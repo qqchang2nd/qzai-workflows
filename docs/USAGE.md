@@ -41,6 +41,12 @@ jobs:
   - `QZAI_APP_PRIVATE_KEY`
 - GitHub App 已安装到目标仓库。
 
+## 推荐流程（强烈建议阅读）
+
+- docs/LIFECYCLE.md
+
+该文档定义了 Issue 与 PR 的职责边界与推荐流转图：默认 **先有 Issue，再有 PR**，并由实现 PR 使用 `Closes #<issue>` 关闭 Issue。
+
 ## 支持命令
 
 - `/qzai status[:：] <todo|in-progress|blocked|review|done>`
