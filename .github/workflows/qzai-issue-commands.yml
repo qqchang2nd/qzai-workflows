@@ -46,28 +46,56 @@ jobs:
               return;
             }
 
-            // 1) 防重复执行校验
-            const { data: reactions } = await github.rest.reactions.listForIssueComment({
-              owner,
-              repo,
-              comment_id: comment.id,
-            });
+            const botLogin = 'qzai-bot[bot]';
 
-            const alreadyProcessed = reactions.some((r) => r.content === 'eyes' || r.content === 'rocket');
-            if (alreadyProcessed) {
-              core.info('Skip: reaction "eyes" or "rocket" already exists.');
-              return;
+            const safeCreateReaction = async (content) => {
+              try {
+                await github.rest.reactions.createForIssueComment({
+                  owner,
+                  repo,
+                  comment_id: comment.id,
+                  content,
+                });
+              } catch (err) {
+                // 422 通常表示 reaction 已存在；忽略即可保证幂等。
+                if (err.status === 422) return;
+                core.warning(`create reaction ${content} failed: ${err.message}`);
+              }
+            };
+
+            const safeListReactions = async () => {
+              try {
+                const res = await github.rest.reactions.listForIssueComment({
+                  owner,
+                  repo,
+                  comment_id: comment.id,
+                  per_page: 100,
+                });
+                return res.data || [];
+              } catch (err) {
+                core.warning(`list reactions failed: ${err.message}`);
+                return null;
+              }
+            };
+
+            // 1) 防重复执行校验：仅当「bot 自己」打过 ✅/rocket（成功回执）时才跳过。
+            // 👀/eyes 只表示处理中，不应阻止重试。
+            const reactions = await safeListReactions();
+            if (reactions) {
+              const alreadyDone = reactions.some(
+                (r) => r.content === 'rocket' && r.user && r.user.login === botLogin
+              );
+              if (alreadyDone) {
+                core.info('Skip: comment already processed successfully by qzai-bot.');
+                return;
+              }
             }
 
-            // 2) 添加处理中回执 (eyes)
-            await github.rest.reactions.createForIssueComment({
-              owner,
-              repo,
-              comment_id: comment.id,
-              content: 'eyes',
-            });
+            // 2) 添加处理中回执 (eyes)（尽力而为）
+            await safeCreateReaction('eyes');
 
             try {
+
               const validStatus = new Set(['todo', 'in-progress', 'blocked', 'review', 'done']);
               const commandRegex = /\/qzai\s+(decision|next|status|ship)\b/g;
 
@@ -233,20 +261,10 @@ jobs:
               }
 
               // 3) 成功后添加完成回执 (rocket)
-              await github.rest.reactions.createForIssueComment({
-                owner,
-                repo,
-                comment_id: comment.id,
-                content: 'rocket',
-              });
+              await safeCreateReaction('rocket');
             } catch (error) {
               // 4) 失败后添加错误回执 (-1)
-              await github.rest.reactions.createForIssueComment({
-                owner,
-                repo,
-                comment_id: comment.id,
-                content: '-1',
-              });
+              await safeCreateReaction('-1');
 
               // 5) 发布错误评论
               await github.rest.issues.createComment({
