@@ -49,10 +49,10 @@ jobs:
             const validStatus = new Set(['todo', 'in-progress', 'blocked', 'review', 'done']);
             const commandRegex = /\/qzai\s+(decision|next|status|ship)\b/g;
             const blockFor = (name) => {
-              const re = new RegExp(String.raw`\/qzai\s+${name}:\s*([\s\S]*?)(?=\n\s*\/qzai\s+(?:decision|next|status|ship)\b|$)`, 'ig');
+              const re = new RegExp(String.raw`\/qzai\s+${name}[:：]\s*([\s\S]*?)(?=\n\s*\/qzai\s+(?:decision|next|status|ship)\b|$)`, 'ig');
               return [...body.matchAll(re)].map((m) => (m[1] || '').trim()).filter(Boolean);
             };
-            const statusMatches = [...body.matchAll(/\/qzai\s+status:\s*([^\n\r]+)/ig)]
+            const statusMatches = [...body.matchAll(/\/qzai\s+status[:：]\s*([^\n\r]+)/ig)]
               .map((m) => (m[1] || '').trim().toLowerCase())
               .filter(Boolean);
             const hasShip = /(^|\n)\s*\/qzai\s+ship\s*($|\n)/im.test(body);

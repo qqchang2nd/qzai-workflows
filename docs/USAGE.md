@@ -43,9 +43,9 @@ jobs:
 
 ## 支持命令
 
-- `/qzai status: <todo|in-progress|blocked|review|done>`
-- `/qzai decision: ...`
-- `/qzai next: ...`
+- `/qzai status[:：] <todo|in-progress|blocked|review|done>`
+- `/qzai decision[:：] ...`
+- `/qzai next[:：] ...`
 - `/qzai ship`
 
 行为与 `voice-insight` 的现有版本一致：中文输出、真实换行、`status:*` 标签自动管理且会确保目标标签存在。

@@ -1,0 +1,14 @@
+name: QZAI Issue Commands (This Repo)
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  qzai-issue-commands:
+    uses: ./.github/workflows/qzai-issue-commands.yml
+    secrets: inherit
