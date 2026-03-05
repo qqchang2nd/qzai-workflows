@@ -47,6 +47,8 @@ jobs:
 
 该文档定义了 Issue 与 PR 的职责边界与推荐流转图：默认 **先有 Issue，再有 PR**，并由实现 PR 使用 `Closes #<issue>` 关闭 Issue。
 
+看板（Projects）方面：当前以 Issue label（`status:*`/`priority:*`）作为唯一驱动源；Projects 作为投影，后续由 `/qzai` 自动化补齐同步能力。
+
 ## 支持命令
 
 - `/qzai status[:：] <todo|in-progress|blocked|review|done>`

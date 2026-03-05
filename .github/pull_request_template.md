@@ -4,8 +4,12 @@
 
 ## 关联 Issue（必填）
 
-- Refs #<issue-number>（计划类 PR）
-- Closes #<issue-number>（实现类 PR，合并后自动关闭）
+规则：二选一（默认不要同时写）
+- 计划类 PR：Refs #<issue-number>
+- 实现类 PR：Closes #<issue-number>（合并后自动关闭）
+
+- Refs #<issue-number>
+- Closes #<issue-number>
 
 ## 做了什么
 
@@ -17,6 +21,7 @@
 - [ ] 关键逻辑有验证证据（见下方“测试与验证”）
 - [ ] 文档/注释已同步（如需要）
 - [ ] 风险与回滚已说明
+- [ ] 如使用 Projects 看板：已同步 Project 字段（Status/Priority 等）
 
 ## 测试与验证
 

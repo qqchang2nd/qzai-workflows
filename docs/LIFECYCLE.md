@@ -47,6 +47,18 @@
 
 ---
 
+## 看板（Projects）联动（最小约定）
+
+原则：**Issue 是真相源（SSOT），看板只是投影**。
+
+- `status:*`、`priority:*` **一律用 Issue label 表达**（例如 `status:todo`、`status:review`、`priority:P0`）。
+- Projects 作为可视化：
+  - Project 字段 `Status` 建议与 `status:*` 同步（Todo/In Progress/Blocked/Review/Done）。
+  - Project 字段 `Priority` 建议与 `priority:*` 同步。
+
+当前阶段：我们先以 label 作为唯一驱动源；Project 同步能力后续由 `/qzai` 自动化补齐。
+
+
 ## 强制规则（不满足即不合并）
 
 1) **每个 PR 必须关联至少一个 Issue**
@@ -76,3 +88,21 @@
 - Closes #123
 
 说明：合并后会自动关闭 #123。
+
+---
+
+## Plan PR 边界（什么算“只写计划”）
+
+允许：
+- 新增/修改文档（计划、SOP、说明）
+- 新增 Issue 拆解清单（以文档或 issue 列表形式）
+
+不允许（除非 Master 明确要求）：
+- 引入实际业务代码变更
+- 大规模重构
+
+## 最小实例
+
+- Issue #123：明确目标与 DoD
+- Plan PR #124：`Refs #123`，只提交计划文档
+- Impl PR #125：`Closes #123`，提交实现与测试证据
