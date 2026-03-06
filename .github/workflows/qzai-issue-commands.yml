@@ -33,6 +33,8 @@ jobs:
         with:
           github-token: ${{ steps.app-token.outputs.token }}
           script: |
+            const crypto = require('crypto');
+
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const issueNumber = context.payload.issue.number;
@@ -46,7 +48,9 @@ jobs:
               return;
             }
 
-            const botLogin = 'qzai-bot[bot]';
+            // 动态获取当前 token 对应的 login（避免写死 qzai-bot[bot]）
+            const auth = await github.rest.users.getAuthenticated();
+            const botLogin = auth.data.login;
 
             const safeCreateReaction = async (content) => {
               try {
@@ -109,11 +113,11 @@ jobs:
                 (r) => r.content === 'rocket' && r.user && r.user.login === botLogin
               );
               if (alreadyDone) {
-                core.info('Skip: comment already processed successfully by qzai-bot (rocket reaction found).');
+                core.info(`Skip: comment already processed successfully by ${botLogin} (rocket reaction found).`);
                 return;
               }
 
-              // 并发窗口收敛：只认 qzai-bot[bot] 的 👀（eyes）作为“处理中”锁。
+              // 并发窗口收敛：只认当前 botLogin 的 👀（eyes）作为“处理中”锁。
               const botEyesReaction = reactions.find(
                 (r) => r.content === 'eyes' && r.user && r.user.login === botLogin
               );
@@ -123,7 +127,7 @@ jobs:
                 const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000); // 2 minutes in milliseconds
 
                 if (createdAt > twoMinutesAgo) {
-                  core.info('Skip: qzai-bot[bot] is already processing this comment (eyes reaction less than 2 minutes old).');
+                  core.info(`Skip: ${botLogin} is already processing this comment (eyes reaction less than 2 minutes old).`);
                   // Re-add eyes reaction to show it's still active.
                   await safeCreateReaction('eyes');
                   return;
@@ -272,18 +276,20 @@ jobs:
 
                 const links = [];
                 for (const title of items) {
-                  const issueBodyContent = `Parent: #${issueNumber}\\nSource comment: ${comment.html_url}\\nRequested by: @${actor}`;
+                  // 多行幂等：comment_url + sha256(title) 作为 itemKey
+                  const itemKey = crypto.createHash('sha256').update(title).digest('hex');
+                  const issueBodyContent = `Parent: #${issueNumber}\\nSource comment: ${comment.html_url}\\nRequested by: @${actor}\\nNext item key: ${itemKey}`;
 
-                  // 检查是否已存在包含相同 Source comment URL 的 Issue
+                  // 检查是否已存在包含相同 Source comment URL 与 itemKey 的 Issue
                   const searchResult = await github.rest.search.issuesAndPullRequests({
-                    q: `repo:${owner}/${repo} in:body "Source comment: ${comment.html_url}"`, // Corrected escaping for double quotes
-                    per_page: 1, // 只需检查是否存在一个
+                    q: `repo:${owner}/${repo} in:body "Source comment: ${comment.html_url}" "Next item key: ${itemKey}"`,
+                    per_page: 1,
                   });
 
                   if (searchResult.data.items.length > 0) {
                     const existingIssue = searchResult.data.items[0];
                     summary.push(
-                      `- ℹ️ 对 Comment ${comment.id} 的 /qzai next 命令已创建过 Issue #${existingIssue.number} ${existingIssue.html_url}，跳过重复创建。`
+                      `- ℹ️ /qzai next item "${title}" 已创建过 Issue #${existingIssue.number} ${existingIssue.html_url}，跳过重复创建。`
                     );
                     links.push(`- (已存在) #${existingIssue.number} ${existingIssue.html_url}`);
                   } else {
@@ -313,7 +319,7 @@ jobs:
               for (const nextText of nextBlocks) await createNextIssues(nextText);
 
               if (hasShip) {
-                // 检查是否已存在由 qzai-bot[bot] 发布的 Ship Checklist
+                // 检查是否已存在由当前 botLogin 发布的 Ship Checklist
                 const comments = await github.rest.issues.listComments({ owner, repo, issue_number: issueNumber, per_page: 100 });
                 const existingShipChecklist = comments.data.some(
                   (c) => c.user && c.user.login === botLogin && c.body && c.body.includes('### Ship Checklist')
