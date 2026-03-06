@@ -368,3 +368,4 @@ jobs:
               // 尽力移除本次创建的 👀 (best-effort)
               await safeDeleteReaction('eyes');
             }
+# smoke-test: 20260307-015048
