@@ -50,8 +50,8 @@ jobs:
 
 
             // 动态获取当前 token 对应的 login（避免写死 qzai-bot[bot]）
-            const { data: me } = await github.rest.users.getAuthenticated();
-            const botLogin = me.login;
+            // 因 GitHub App installation token 下不可用 users.getAuthenticated()，暂时硬编码为 github-actions[bot]
+            const botLogin = 'github-actions[bot]';
 
             const safeCreateReaction = async (content) => {
               try {
