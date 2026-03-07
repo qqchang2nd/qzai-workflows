@@ -46,198 +46,319 @@ jobs:
               return;
             }
 
-            const validStatus = new Set(['todo', 'in-progress', 'blocked', 'review', 'done']);
-            const commandRegex = /\/qzai\s+(decision|next|status|ship)\b/g;
-            const blockFor = (name) => {
-              const re = new RegExp(String.raw`\/qzai\s+${name}[:：]\s*([\s\S]*?)(?=\n\s*\/qzai\s+(?:decision|next|status|ship)\b|$)`, 'ig');
-              return [...body.matchAll(re)].map((m) => (m[1] || '').trim()).filter(Boolean);
-            };
-            const statusMatches = [...body.matchAll(/\/qzai\s+status[:：]\s*([^\n\r]+)/ig)]
-              .map((m) => (m[1] || '').trim().toLowerCase())
-              .filter(Boolean);
-            const hasShip = /(^|\n)\s*\/qzai\s+ship\s*($|\n)/im.test(body);
-            const decisionBlocks = blockFor('decision');
-            const nextBlocks = blockFor('next');
+            const botLogin = 'qzai-bot[bot]';
 
-            if (![...body.matchAll(commandRegex)].length) {
-              core.info('No supported command found.');
-              return;
-            }
-
-            const summary = [];
-
-            const ensureLabelExists = async (labelName) => {
+            const safeCreateReaction = async (content) => {
               try {
-                await github.rest.issues.getLabel({ owner, repo, name: labelName });
-              } catch (err) {
-                if (err.status !== 404) {
-                  throw err;
-                }
-                await github.rest.issues.createLabel({
+                await github.rest.reactions.createForIssueComment({
                   owner,
                   repo,
-                  name: labelName,
-                  color: '0E8A16',
+                  comment_id: comment.id,
+                  content,
                 });
+              } catch (err) {
+                // 422 通常表示 reaction 已存在；忽略即可保证幂等。
+                if (err.status === 422) return;
+                core.warning(`create reaction ${content} failed: ${err.message}`);
               }
             };
 
-            const setStatus = async (status) => {
-              if (!validStatus.has(status)) {
+            const safeListReactions = async () => {
+              try {
+                const res = await github.rest.reactions.listForIssueComment({
+                  owner,
+                  repo,
+                  comment_id: comment.id,
+                  per_page: 100,
+                });
+                return res.data || [];
+              } catch (err) {
+                core.warning(`list reactions failed: ${err.message}`);
+                return null;
+              }
+            };
+
+            const safeDeleteReaction = async (content) => {
+              try {
+                const reactions = await safeListReactions();
+                if (reactions) {
+                  const botReaction = reactions.find(
+                    (r) => r.content === content && r.user && r.user.login === botLogin
+                  );
+                  if (botReaction) {
+                    await github.rest.reactions.deleteForIssueComment({
+                      owner,
+                      repo,
+                      comment_id: comment.id,
+                      reaction_id: botReaction.id,
+                    });
+                  }
+                }
+              } catch (err) {
+                // 422 usually means reaction not found/already gone; ignore.
+                if (err.status === 422) return;
+                core.warning(`delete reaction ${content} failed: ${err.message}`);
+              }
+            };
+
+            // 1) 防重复执行校验：仅当「bot 自己」打过 ✅/rocket（成功回执）时才跳过。
+            // 引入并发窗口锁 (eyes) 检查
+            const reactions = await safeListReactions();
+            if (reactions) {
+              const alreadyDone = reactions.some(
+                (r) => r.content === 'rocket' && r.user && r.user.login === botLogin
+              );
+              if (alreadyDone) {
+                core.info('Skip: comment already processed successfully by qzai-bot (rocket reaction found).');
+                return;
+              }
+
+              // 并发窗口收敛：只认 qzai-bot[bot] 的 👀（eyes）作为“处理中”锁。
+              const botEyesReaction = reactions.find(
+                (r) => r.content === 'eyes' && r.user && r.user.login === botLogin
+              );
+
+              if (botEyesReaction) {
+                const createdAt = new Date(botEyesReaction.created_at);
+                const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000); // 2 minutes in milliseconds
+
+                if (createdAt > twoMinutesAgo) {
+                  core.info('Skip: qzai-bot[bot] is already processing this comment (eyes reaction less than 2 minutes old).');
+                  // Re-add eyes reaction to show it's still active.
+                  await safeCreateReaction('eyes');
+                  return;
+                } else {
+                  core.warning('Existing "eyes" reaction found but is older than 2 minutes. Proceeding with execution, assuming previous process timed out.');
+                  // If stale, attempt to remove it before creating a new one. Best-effort.
+                  await safeDeleteReaction('eyes');
+                }
+              }
+            }
+
+            // 2) 添加处理中回执 (eyes)（尽力而为）
+            await safeCreateReaction('eyes');
+
+            try {
+
+              const validStatus = new Set(['todo', 'in-progress', 'blocked', 'review', 'done']);
+              const commandRegex = /\/qzai\s+(decision|next|status|ship)\b/g;
+
+              const blockFor = (name) => {
+                const re = new RegExp(
+                  String.raw`\/qzai\s+${name}[:：]\s*([\s\S]*?)(?=\n\s*\/qzai\s+(?:decision|next|status|ship)\b|$)`,
+                  'ig'
+                );
+                return [...body.matchAll(re)]
+                  .map((m) => (m[1] || '').trim())
+                  .filter(Boolean);
+              };
+
+              const statusMatches = [...body.matchAll(/\/qzai\s+status[:：]\s*([^\n\r]+)/ig)]
+                .map((m) => (m[1] || '').trim().toLowerCase())
+                .filter(Boolean);
+
+              const hasShip = /(^|\n)\s*\/qzai\s+ship\s*($|\n)/im.test(body);
+              const decisionBlocks = blockFor('decision');
+              const nextBlocks = blockFor('next');
+
+              if (![...body.matchAll(commandRegex)].length) {
+                core.info('No supported command found.');
+                return;
+              }
+
+              const summary = [];
+
+              const ensureLabelExists = async (labelName) => {
+                try {
+                  await github.rest.issues.getLabel({ owner, repo, name: labelName });
+                } catch (err) {
+                  if (err.status !== 404) throw err;
+                  await github.rest.issues.createLabel({
+                    owner,
+                    repo,
+                    name: labelName,
+                    color: '0E8A16',
+                  });
+                }
+              };
+
+              const setStatus = async (status) => {
+                if (!validStatus.has(status)) {
+                  summary.push(
+                    `- ⚠️ 忽略非法状态 \`${status}\` (可用: todo, in-progress, blocked, review, done)`
+                  );
+                  return;
+                }
+
+                const targetLabel = `status:${status}`;
+                await ensureLabelExists(targetLabel);
+
+                const latest = await github.rest.issues.get({ owner, repo, issue_number: issueNumber });
+                const existing = (latest.data.labels || [])
+                  .map((l) => (typeof l === 'string' ? l : l.name))
+                  .filter(Boolean);
+
+                const toRemove = existing.filter((l) => l.startsWith('status:') && l !== targetLabel);
+
+                for (const label of toRemove) {
+                  try {
+                    await github.rest.issues.removeLabel({ owner, repo, issue_number: issueNumber, name: label });
+                  } catch (err) {
+                    core.warning(`Remove label ${label} failed: ${err.message}`);
+                  }
+                }
+
+                try {
+                  await github.rest.issues.addLabels({
+                    owner,
+                    repo,
+                    issue_number: issueNumber,
+                    labels: [targetLabel],
+                  });
+                } catch (err) {
+                  if (err.status !== 422) throw err;
+                }
+
+                summary.push(`- 状态已更新为 \`${targetLabel}\``);
+              };
+
+              const appendDecision = async (decisionText) => {
+                const now = new Date().toISOString();
+                const lines = decisionText
+                  .split(/\r?\n/)
+                  .map((line) => line.trim())
+                  .filter(Boolean);
+
+                const entry = [`- ${now} by @${actor}`, ...lines.map((line) => `  - ${line}`)].join('\\n');
+
+                const latest = await github.rest.issues.get({ owner, repo, issue_number: issueNumber });
+                const currentBody = latest.data.body || '';
+                const sectionRe = /(^|\n)##\s+Decision Log\s*\n([\s\S]*?)(?=\n##\s+|$)/m;
+
+                let nextBody;
+                if (sectionRe.test(currentBody)) {
+                  nextBody = currentBody.replace(sectionRe, (match, prefix, content) => {
+                    const trimmed = content.trimEnd();
+                    return `${prefix}## Decision Log\\n${trimmed ? trimmed + '\\n' : ''}${entry}\\n`;
+                  });
+                } else {
+                  const base = currentBody.trimEnd();
+                  nextBody = `${base ? base + '\\n\\n' : ''}## Decision Log\\n${entry}`;
+                }
+
+                try {
+                  await github.rest.issues.update({ owner, repo, issue_number: issueNumber, body: nextBody });
+                  summary.push('- ✅ 已写入 Issue 的 `Decision Log` 区块');
+                } catch (err) {
+                  core.warning(`Failed to update issue body for Decision Log: ${err.message}. Falling back to comment.`);
+                  await github.rest.issues.createComment({
+                    owner,
+                    repo,
+                    issue_number: issueNumber,
+                    body: `### ⚠️ Decision Log 写入失败，通过评论记录：\\n\\n\`\`\`\\n${decisionText}\\n\`\`\`\\n\\n**错误详情：**\\n\`\`\`\\n${err.message}\\n\`\`\``,
+                  });
+                  summary.push('- ⚠️ 写入 Issue 的 `Decision Log` 区块失败，已通过评论记录。');
+                }
+              };
+
+              const createNextIssues = async (blockText) => {
+                const items = blockText
+                  .split(/\r?\n/)
+                  .map((l) => l.trim())
+                  .filter((l) => l && !l.startsWith('#'))
+                  .map((l) => l.replace(/^[-*]\s+/, '').trim());
+
+                if (items.length === 0) return;
+
+                const links = [];
+                for (const title of items) {
+                  const issueBodyContent = `Parent: #${issueNumber}\\nSource comment: ${comment.html_url}\\nRequested by: @${actor}`;
+
+                  // 检查是否已存在包含相同 Source comment URL 的 Issue
+                  const searchResult = await github.rest.search.issuesAndPullRequests({
+                    q: `repo:${owner}/${repo} in:body "Source comment: ${comment.html_url}"`, // Corrected escaping for double quotes
+                    per_page: 1, // 只需检查是否存在一个
+                  });
+
+                  if (searchResult.data.items.length > 0) {
+                    const existingIssue = searchResult.data.items[0];
+                    summary.push(
+                      `- ℹ️ 对 Comment ${comment.id} 的 /qzai next 命令已创建过 Issue #${existingIssue.number} ${existingIssue.html_url}，跳过重复创建。`
+                    );
+                    links.push(`- (已存在) #${existingIssue.number} ${existingIssue.html_url}`);
+                  } else {
+                    const created = await github.rest.issues.create({
+                      owner,
+                      repo,
+                      title,
+                      body: issueBodyContent,
+                    });
+                    links.push(`- ✅ #${created.data.number} ${created.data.html_url}`);
+                  }
+                }
+
+                if (links.length > 0) {
+                  summary.push(`- 已处理 ${links.length} 个后续 Issue`);
+                  await github.rest.issues.createComment({
+                    owner,
+                    repo,
+                    issue_number: issueNumber,
+                    body: `### Next Issues\\n${links.join('\\n')}`,
+                  });
+                }
+              };
+
+              for (const status of statusMatches) await setStatus(status);
+              for (const decision of decisionBlocks) await appendDecision(decision);
+              for (const nextText of nextBlocks) await createNextIssues(nextText);
+
+              if (hasShip) {
+                // 检查是否已存在由 qzai-bot[bot] 发布的 Ship Checklist
+                const comments = await github.rest.issues.listComments({ owner, repo, issue_number: issueNumber, per_page: 100 });
+                const existingShipChecklist = comments.data.some(
+                  (c) => c.user && c.user.login === botLogin && c.body && c.body.includes('### Ship Checklist')
+                );
+
+                if (existingShipChecklist) {
+                  summary.push('- ℹ️ `/qzai ship` 已发布过 Ship Checklist，跳过重复发布。');
+                } else {
+                  await setStatus('review');
+                  await github.rest.issues.createComment({
+                    owner,
+                    repo,
+                    issue_number: issueNumber,
+                    body:
+                      '### Ship Checklist\\n- [ ] 功能验收（核心流程可用）\\n- [ ] 测试通过（自动化/手工）\\n- [ ] 文档同步（README / USAGE）\\n- [ ] 风险与回滚方案已确认',
+                  });
+                  summary.push('- ✅ 已执行 `/qzai ship`：状态改为 `status:review` 并发布验收清单');
+                }
+              }
+
+              if (summary.length > 0) {
                 await github.rest.issues.createComment({
                   owner,
                   repo,
                   issue_number: issueNumber,
-                  body: [
-                    '### QZAI 指令错误',
-                    `不支持的状态：\`${status}\``,
-                    '可用值：`todo`、`in-progress`、`blocked`、`review`、`done`',
-                  ].join('\n'),
+                  body: `### QZAI 执行结果\n${summary.join('\n')}`,
                 });
-                summary.push(`- 忽略非法状态 \`${status}\``);
-                return;
-              }
-              const targetLabel = `status:${status}`;
-              const latest = await github.rest.issues.get({ owner, repo, issue_number: issueNumber });
-              const existing = (latest.data.labels || []).map((l) => typeof l === 'string' ? l : l.name).filter(Boolean);
-              const toRemove = existing.filter((l) => l.startsWith('status:') && l !== targetLabel);
-
-              for (const label of toRemove) {
-                try {
-                  await github.rest.issues.removeLabel({ owner, repo, issue_number: issueNumber, name: label });
-                } catch (err) {
-                  core.warning(`remove label ${label} failed: ${err.message}`);
-                }
               }
 
-              await ensureLabelExists(targetLabel);
+              // 3) 成功后添加完成回执 (rocket)
+              await safeCreateReaction('rocket');
+            } catch (error) {
+              // 4) 失败后添加错误回执 (-1)
+              await safeCreateReaction('-1');
 
-              try {
-                await github.rest.issues.addLabels({ owner, repo, issue_number: issueNumber, labels: [targetLabel] });
-              } catch (err) {
-                if (err.status !== 422) {
-                  throw err;
-                }
-              }
-
-              summary.push(`- 状态已更新为 \`${targetLabel}\``);
-            };
-
-            const appendDecision = async (decisionText) => {
-              const now = new Date().toISOString();
-              const lines = decisionText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-              const entry = [
-                `- ${now} by @${actor}`,
-                ...lines.map((line) => `  - ${line}`),
-              ].join('\n');
-
-              const latest = await github.rest.issues.get({ owner, repo, issue_number: issueNumber });
-              const currentBody = latest.data.body || '';
-              const sectionRe = /(^|\n)##\s+Decision Log\s*\n([\s\S]*?)(?=\n##\s+|$)/m;
-
-              let nextBody;
-              if (sectionRe.test(currentBody)) {
-                nextBody = currentBody.replace(sectionRe, (match, prefix, content) => {
-                  const trimmed = content.trimEnd();
-                  const merged = trimmed ? `${trimmed}\n${entry}` : entry;
-                  return `${prefix}## Decision Log\n${merged}\n`;
-                });
-              } else {
-                const base = currentBody.trimEnd();
-                nextBody = `${base ? `${base}\n\n` : ''}## Decision Log\n${entry}`;
-              }
-
-              try {
-                await github.rest.issues.update({ owner, repo, issue_number: issueNumber, body: nextBody });
-                summary.push('- 已写入 Issue 的 `Decision Log` 区块');
-              } catch (err) {
-                core.warning(`issue body update failed: ${err.message}`);
-                const fallbackBody = [
-                  '### Decision Log',
-                  entry,
-                ].join('\n\n');
-                await github.rest.issues.createComment({ owner, repo, issue_number: issueNumber, body: fallbackBody });
-                summary.push('- Issue 正文更新失败，已改为 Bot 评论写入 Decision Log');
-              }
-            };
-
-            const createNextIssues = async (blockText) => {
-              const items = blockText
-                .split(/\r?\n/)
-                .map((line) => line.trim())
-                .filter(Boolean)
-                .map((line) => line.replace(/^[-*]\s+/, '').trim())
-                .filter(Boolean);
-
-              if (items.length === 0) {
-                throw new Error('`/qzai next:` 需要至少一条任务（每行一条）');
-              }
-
-              const links = [];
-              for (const title of items) {
-                const created = await github.rest.issues.create({
-                  owner,
-                  repo,
-                  title,
-                  body: [
-                    `Parent: #${issueNumber}`,
-                    `Source comment: ${comment.html_url}`,
-                    `Requested by: @${actor}`,
-                  ].join('\n'),
-                });
-                links.push(`- #${created.data.number} ${created.data.html_url}`);
-              }
-
-              summary.push(`- 已创建 ${links.length} 个后续 Issue`);
-
+              // 5) 发布错误评论
               await github.rest.issues.createComment({
                 owner,
                 repo,
                 issue_number: issueNumber,
-                body: [
-                  '### Next Issues',
-                  ...links,
-                ].join('\n'),
+                body:
+                  `### ❌ QZAI 指令执行失败\n\n**错误详情：**\n\n\`\`\`\n${error.message}\n\`\`\`\n\n请检查指令语法或联系管理员。`,
               });
-            };
-
-            for (const status of statusMatches) {
-              await setStatus(status);
-            }
-
-            for (const decision of decisionBlocks) {
-              await appendDecision(decision);
-            }
-
-            for (const nextText of nextBlocks) {
-              await createNextIssues(nextText);
-            }
-
-            if (hasShip) {
-              await setStatus('review');
-              await github.rest.issues.createComment({
-                owner,
-                repo,
-                issue_number: issueNumber,
-                body: [
-                  '### Ship Checklist',
-                  '- [ ] 功能验收（核心流程可用）',
-                  '- [ ] 测试通过（自动化/手工）',
-                  '- [ ] 文档同步（README / COMMANDS）',
-                  '- [ ] 风险与回滚方案已确认',
-                ].join('\n'),
-              });
-              summary.push('- 已执行 `/qzai ship`：状态改为 `status:review` 并发布验收清单');
-            }
-
-            if (summary.length > 0) {
-              await github.rest.issues.createComment({
-                owner,
-                repo,
-                issue_number: issueNumber,
-                body: [
-                  '### QZAI 执行结果',
-                  ...summary,
-                ].join('\n'),
-              });
+              throw error;
+            } finally {
+              // 尽力移除本次创建的 👀 (best-effort)
+              await safeDeleteReaction('eyes');
             }
