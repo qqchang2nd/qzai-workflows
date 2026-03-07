@@ -333,8 +333,13 @@ jobs:
                     owner,
                     repo,
                     issue_number: issueNumber,
-                    body:
-                      '### Ship Checklist\\n- [ ] 功能验收（核心流程可用）\\n- [ ] 测试通过（自动化/手工）\\n- [ ] 文档同步（README / USAGE）\\n- [ ] 风险与回滚方案已确认',
+                    body: [
+                      '### Ship Checklist',
+                      '- [ ] 功能验收（核心流程可用）',
+                      '- [ ] 测试通过（自动化/手工）',
+                      '- [ ] 文档同步（README / USAGE）',
+                      '- [ ] 风险与回滚方案已确认',
+                    ].join('\n'),
                   });
                   summary.push('- ✅ 已执行 `/qzai ship`：状态改为 `status:review` 并发布验收清单');
                 }
