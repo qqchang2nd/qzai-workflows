@@ -1,0 +1,16 @@
+name: QZAI Two-Stage PR Flow (This Repo)
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  checks: write
+
+jobs:
+  qzai-two-stage:
+    uses: ./.github/workflows/qzai-two-stage-pr.yml
+    secrets: inherit
