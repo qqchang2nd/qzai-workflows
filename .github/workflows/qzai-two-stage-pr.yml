@@ -95,6 +95,7 @@ jobs:
           APPS_JSON: ${{ steps.apps.outputs.appsJson }}
           AGENT_ID: ${{ steps.cmd.outputs.agentId }}
           QZAI_APP_ID: ${{ secrets.QZAI_APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.QZAI_APP_PRIVATE_KEY }}
           INSTALLATION_ID: ${{ steps.app-token.outputs.installation_id }}
         with:
           github-token: ${{ steps.app-token.outputs.token }}
@@ -127,15 +128,28 @@ jobs:
             if (!Number.isFinite(expectedInstallationId) || expectedInstallationId <= 0) {
               core.setFailed(`Fail-closed: invalid .qzai/apps.json agents.${agentId}.installationId (must be positive number)`);
               return;
+            }            // Fetch app identity using an App JWT (installation tokens cannot call GET /app, and /user may be blocked).
+            // We build a short-lived JWT from QZAI_APP_ID + APP_PRIVATE_KEY and call GET /app with Authorization: Bearer <jwt>.
+            const crypto = require('crypto');
+            const appIdStr = String(process.env.QZAI_APP_ID || '');
+            const privateKey = String(process.env.APP_PRIVATE_KEY || '');
+            if (!privateKey) {
+              core.setFailed('Fail-closed: missing APP_PRIVATE_KEY (QZAI_APP_PRIVATE_KEY secret)');
+              return;
             }
+            const now = Math.floor(Date.now() / 1000);
+            const header = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString('base64url');
+            const payload = Buffer.from(JSON.stringify({ iat: now, exp: now + 600, iss: appIdStr })).toString('base64url');
+            const toSign = `${header}.${payload}`;
+            const sig = crypto.createSign('RSA-SHA256').update(toSign).sign(privateKey).toString('base64url');
+            const jwt = `${toSign}.${sig}`;
 
-            // NOTE: Installation tokens cannot call GET /app.
-            // Derive app identity via GET /user (installation token identifies as the app bot user).
-            const me = await github.rest.users.getAuthenticated();
-            const myLogin = String(me?.data?.login || '');
-            // API login may include a "[bot]" suffix; normalize to app slug.
-            const actualSlug = myLogin.replace(/\[bot\]$/i, '');
-            const actualAppId = Number(process.env.QZAI_APP_ID);
+            const appResp = await github.request('GET /app', {
+              headers: { authorization: `Bearer ${jwt}` },
+            });
+
+            const actualSlug = String(appResp.data.slug || '');
+            const actualAppId = Number(appResp.data.id);
             const actualInstallationId = Number(process.env.INSTALLATION_ID);
 
             if (expectedSlug !== actualSlug) {
