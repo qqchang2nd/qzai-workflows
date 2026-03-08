@@ -9,8 +9,32 @@ permissions:
   issues: write
 
 jobs:
+  guard-two-stage-overlap:
+    name: Guard two-stage overlap
+    runs-on: ubuntu-latest
+    outputs:
+      allow_wrapper: ${{ steps.check.outputs.allow_wrapper }}
+    steps:
+      - id: check
+        name: Check first-line command
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Match the two-stage entrypoint by trimming ONLY the first line.
+          # This prevents overlap even when users add leading spaces, e.g. "  /qzai plan-pr".
+          first_line="$(printf '%s' "${{ github.event.comment.body }}" | head -n 1)"
+          first_line_trimmed="$(printf '%s' "$first_line" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+
+          if [[ "$first_line_trimmed" =~ ^/qzai[[:space:]]+(plan-pr|impl-pr)\b ]]; then
+            echo "allow_wrapper=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "allow_wrapper=true" >> "$GITHUB_OUTPUT"
+          fi
+
   qzai-issue-commands:
     # Avoid overlap with the v8 two-stage entrypoint (/qzai plan-pr, /qzai impl-pr)
-    if: ${{ !(startsWith(github.event.comment.body, '/qzai plan-pr') || startsWith(github.event.comment.body, '/qzai impl-pr')) }}
+    needs: [guard-two-stage-overlap]
+    if: ${{ needs.guard-two-stage-overlap.outputs.allow_wrapper == 'true' }}
     uses: ./.github/workflows/qzai-issue-commands.yml
     secrets: inherit
