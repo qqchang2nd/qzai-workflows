@@ -136,6 +136,54 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_ENV"
 
+      - name: Get installation id for repo (App JWT)
+        if: steps.cmd.outputs.skip != '1'
+        id: inst
+        uses: actions/github-script@v7
+        env:
+          QZAI_APP_ID: ${{ steps.sel.outputs.app_id }}
+          APP_PRIVATE_KEY: ${{ env.APP_PRIVATE_KEY }}
+        with:
+          # use default github token just to satisfy action; we will call REST via fetch with JWT
+          github-token: ${{ github.token }}
+          script: |
+            const crypto = require('crypto');
+            const appIdStr = String(process.env.QZAI_APP_ID || '');
+            const privateKey = String(process.env.APP_PRIVATE_KEY || '');
+            if (!privateKey) {
+              core.setFailed('Fail-closed: missing APP_PRIVATE_KEY');
+              return;
+            }
+
+            const now = Math.floor(Date.now() / 1000);
+            const header = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString('base64url');
+            const payload = Buffer.from(JSON.stringify({ iat: now, exp: now + 600, iss: Number(appIdStr) })).toString('base64url');
+            const toSign = `${header}.${payload}`;
+            const sig = crypto.createSign('RSA-SHA256').update(toSign).sign(privateKey).toString('base64url');
+            const jwt = `${toSign}.${sig}`;
+
+            const url = `https://api.github.com/repos/${context.repo.owner}/${context.repo.repo}/installation`;
+            const resp = await fetch(url, {
+              method: 'GET',
+              headers: {
+                'Authorization': `Bearer ${jwt}`,
+                'Accept': 'application/vnd.github+json',
+                'X-GitHub-Api-Version': '2022-11-28',
+              },
+            });
+            if (!resp.ok) {
+              const body = await resp.text();
+              core.setFailed(`Fail-closed: failed to get repo installation: HTTP ${resp.status} ${body}`);
+              return;
+            }
+            const data = await resp.json();
+            const installationId = Number(data.id);
+            if (!Number.isFinite(installationId) || installationId <= 0) {
+              core.setFailed('Fail-closed: invalid installation id from GET /repos/{owner}/{repo}/installation');
+              return;
+            }
+            core.setOutput('installation_id', String(installationId));
+
       - name: Create GitHub App installation token
         if: steps.cmd.outputs.skip != '1'
         id: app-token
@@ -153,7 +201,7 @@ jobs:
           AGENT_ID: ${{ steps.cmd.outputs.agentId }}
           QZAI_APP_ID: ${{ steps.sel.outputs.app_id }}
           APP_PRIVATE_KEY: ${{ env.APP_PRIVATE_KEY }}
-          INSTALLATION_ID: ${{ steps.app-token.outputs.installation_id }}
+          INSTALLATION_ID: ${{ steps.inst.outputs.installation_id }}
         with:
           github-token: ${{ steps.app-token.outputs.token }}
           script: |
