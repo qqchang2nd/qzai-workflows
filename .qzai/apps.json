@@ -2,10 +2,40 @@
   "$schema": "https://example.com/qzai-apps.schema.json",
   "version": 1,
   "agents": {
+    "afei": {
+      "appSlug": "qzai-afei",
+      "appId": 2962179,
+      "installationId": 112784939
+    },
+    "aji": {
+      "appSlug": "qzai-aji",
+      "appId": 2962263,
+      "installationId": 112788632
+    },
+    "jingwuming": {
+      "appSlug": "qzai-jingwuming",
+      "appId": 2962267,
+      "installationId": 112788735
+    },
+    "lengyan": {
+      "appSlug": "qzai-lengyan",
+      "appId": 2962221,
+      "installationId": 112788808
+    },
+    "lixunhuan": {
+      "appSlug": "qzai-lixunhuan",
+      "appId": 2962233,
+      "installationId": 112788858
+    },
     "luxiaofeng": {
       "appSlug": "qzai-luxiaofeng",
       "appId": 2962241,
       "installationId": 112788898
+    },
+    "main": {
+      "appSlug": "qzai-bot",
+      "appId": 2899702,
+      "installationId": 111101977
     }
   }
 }
