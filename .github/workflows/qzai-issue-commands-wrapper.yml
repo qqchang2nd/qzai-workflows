@@ -21,12 +21,15 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Match the two-stage entrypoint by trimming ONLY the first line.
-          # This prevents overlap even when users add leading spaces, e.g. "  /qzai plan-pr".
+          # Match the two-stage entrypoint using the SAME normalization strategy as two-stage:
+          # - take first line
+          # - trim
+          # - collapse whitespace runs into a single space
           first_line="$(printf '%s' "${{ github.event.comment.body }}" | head -n 1)"
           first_line_trimmed="$(printf '%s' "$first_line" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+          first_line_normalized="$(printf '%s' "$first_line_trimmed" | tr -s '[:space:]' ' ')"
 
-          if [[ "$first_line_trimmed" =~ ^/qzai[[:space:]]+(plan-pr|impl-pr)\b ]]; then
+          if [[ "$first_line_normalized" == "/qzai plan-pr" || "$first_line_normalized" == "/qzai impl-pr" ]]; then
             echo "allow_wrapper=false" >> "$GITHUB_OUTPUT"
           else
             echo "allow_wrapper=true" >> "$GITHUB_OUTPUT"
