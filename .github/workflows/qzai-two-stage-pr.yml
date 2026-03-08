@@ -128,7 +128,9 @@ jobs:
             if (!Number.isFinite(expectedInstallationId) || expectedInstallationId <= 0) {
               core.setFailed(`Fail-closed: invalid .qzai/apps.json agents.${agentId}.installationId (must be positive number)`);
               return;
-            }            // Fetch app identity using an App JWT (installation tokens cannot call GET /app, and /user may be blocked).
+            }
+
+            // Fetch app identity using an App JWT (installation tokens cannot call GET /app, and /user may be blocked).
             // We build a short-lived JWT from QZAI_APP_ID + APP_PRIVATE_KEY and call GET /app with Authorization: Bearer <jwt>.
             const crypto = require('crypto');
             const appIdStr = String(process.env.QZAI_APP_ID || '');
@@ -139,7 +141,7 @@ jobs:
             }
             const now = Math.floor(Date.now() / 1000);
             const header = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString('base64url');
-            const payload = Buffer.from(JSON.stringify({ iat: now, exp: now + 600, iss: appIdStr })).toString('base64url');
+            const payload = Buffer.from(JSON.stringify({ iat: now, exp: now + 600, iss: Number(appIdStr) })).toString('base64url');
             const toSign = `${header}.${payload}`;
             const sig = crypto.createSign('RSA-SHA256').update(toSign).sign(privateKey).toString('base64url');
             const jwt = `${toSign}.${sig}`;
