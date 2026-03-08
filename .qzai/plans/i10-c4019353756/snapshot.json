@@ -1,0 +1,12 @@
+{
+  "planKey": "i10-c4019353756",
+  "issue": {
+    "number": 10,
+    "title": "设计 pr slash 工作流",
+    "body": "对于 pr, \n要求可以指定某个 bot 来 review,  有了 comments 后， pr 的 owner 自动来根据 comments 做修改，或者拒绝修改， 并评论\n",
+    "labels": [
+      "status:review"
+    ]
+  },
+  "snapshotAt": "2026-03-08T16:00:16.018Z"
+}
