@@ -131,7 +131,7 @@ jobs:
           fi
           echo "app_id=$app_id" >> "$GITHUB_OUTPUT"
           {
-            echo "APP_PRIVATE_KEY<<'EOF'"
+            echo "APP_PRIVATE_KEY<<EOF"
             echo "$key"
             echo "EOF"
           } >> "$GITHUB_ENV"
