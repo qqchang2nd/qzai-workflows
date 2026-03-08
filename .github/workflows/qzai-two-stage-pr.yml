@@ -304,14 +304,22 @@ jobs:
         with:
           github-token: ${{ steps.app-token.outputs.token }}
           script: |
-            const actor = context.payload.sender?.login;
-            const me = await github.rest.users.getAuthenticated();
-            const myLogin = me?.data?.login;
+            const actor = String(context.payload.sender?.login || '').toLowerCase();
+            const slug = String(process.env.APP_SLUG || '').toLowerCase();
 
-            if (actor && myLogin && actor === myLogin) {
+            if (!actor || !slug) {
+              core.info('Skip self-comment check: missing actor or APP_SLUG');
+              return;
+            }
+
+            // Installation tokens may be blocked from calling /user in some repos.
+            // Prevent loops by comparing sender login against app slug.
+            // GitHub bot login is usually either '<slug>' or '<slug>[bot]'.
+            if (actor === slug || actor === `${slug}[bot]`) {
               core.info(`Skip: ignore bot self comment to prevent loops: ${actor}`);
               core.setOutput('skip', '1');
             }
+
 
       - name: React eyes (best-effort)
         if: steps.cmd.outputs.skip != '1' && steps.self.outputs.skip != '1'
