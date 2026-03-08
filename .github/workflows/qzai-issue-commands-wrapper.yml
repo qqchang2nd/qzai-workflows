@@ -10,5 +10,7 @@ permissions:
 
 jobs:
   qzai-issue-commands:
+    # Avoid overlap with the v8 two-stage entrypoint (/qzai plan-pr, /qzai impl-pr)
+    if: ${{ !(startsWith(github.event.comment.body, '/qzai plan-pr') || startsWith(github.event.comment.body, '/qzai impl-pr')) }}
     uses: ./.github/workflows/qzai-issue-commands.yml
     secrets: inherit
