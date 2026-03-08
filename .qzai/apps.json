@@ -1,0 +1,11 @@
+{
+  "$schema": "https://example.com/qzai-apps.schema.json",
+  "version": 1,
+  "agents": {
+    "luxiaofeng": {
+      "appSlug": "qzai-luxiaofeng",
+      "appId": 2962241,
+      "installationId": 112788898
+    }
+  }
+}
