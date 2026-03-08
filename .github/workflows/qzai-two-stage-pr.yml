@@ -3,10 +3,21 @@ name: QZAI Two-Stage PR Flow (Reusable)
 on:
   workflow_call:
     secrets:
-      QZAI_APP_ID:
-        required: true
-      QZAI_APP_PRIVATE_KEY:
-        required: true
+      # Multi-agent secrets routing (required per agentId).
+      QZAI_AFEI_APP_ID: { required: false }
+      QZAI_AFEI_APP_PRIVATE_KEY: { required: false }
+      QZAI_AJI_APP_ID: { required: false }
+      QZAI_AJI_APP_PRIVATE_KEY: { required: false }
+      QZAI_JINGWUMING_APP_ID: { required: false }
+      QZAI_JINGWUMING_APP_PRIVATE_KEY: { required: false }
+      QZAI_LENGYAN_APP_ID: { required: false }
+      QZAI_LENGYAN_APP_PRIVATE_KEY: { required: false }
+      QZAI_LIXUNHUAN_APP_ID: { required: false }
+      QZAI_LIXUNHUAN_APP_PRIVATE_KEY: { required: false }
+      QZAI_LUXIAOFENG_APP_ID: { required: false }
+      QZAI_LUXIAOFENG_APP_PRIVATE_KEY: { required: false }
+      QZAI_MAIN_APP_ID: { required: false }
+      QZAI_MAIN_APP_PRIVATE_KEY: { required: false }
 
 permissions:
   contents: write
@@ -79,13 +90,59 @@ jobs:
             core.setOutput('agentId', kv.agentId);
             core.setOutput('planUrl', kv.plan || '');
 
+      - name: Select agent GitHub App secrets (fail-closed)
+        if: steps.cmd.outputs.skip != '1'
+        id: sel
+        shell: bash
+        env:
+          AGENT_ID: ${{ steps.cmd.outputs.agentId }}
+          QZAI_AFEI_APP_ID: ${{ secrets.QZAI_AFEI_APP_ID }}
+          QZAI_AFEI_APP_PRIVATE_KEY: ${{ secrets.QZAI_AFEI_APP_PRIVATE_KEY }}
+          QZAI_AJI_APP_ID: ${{ secrets.QZAI_AJI_APP_ID }}
+          QZAI_AJI_APP_PRIVATE_KEY: ${{ secrets.QZAI_AJI_APP_PRIVATE_KEY }}
+          QZAI_JINGWUMING_APP_ID: ${{ secrets.QZAI_JINGWUMING_APP_ID }}
+          QZAI_JINGWUMING_APP_PRIVATE_KEY: ${{ secrets.QZAI_JINGWUMING_APP_PRIVATE_KEY }}
+          QZAI_LENGYAN_APP_ID: ${{ secrets.QZAI_LENGYAN_APP_ID }}
+          QZAI_LENGYAN_APP_PRIVATE_KEY: ${{ secrets.QZAI_LENGYAN_APP_PRIVATE_KEY }}
+          QZAI_LIXUNHUAN_APP_ID: ${{ secrets.QZAI_LIXUNHUAN_APP_ID }}
+          QZAI_LIXUNHUAN_APP_PRIVATE_KEY: ${{ secrets.QZAI_LIXUNHUAN_APP_PRIVATE_KEY }}
+          QZAI_LUXIAOFENG_APP_ID: ${{ secrets.QZAI_LUXIAOFENG_APP_ID }}
+          QZAI_LUXIAOFENG_APP_PRIVATE_KEY: ${{ secrets.QZAI_LUXIAOFENG_APP_PRIVATE_KEY }}
+          QZAI_MAIN_APP_ID: ${{ secrets.QZAI_MAIN_APP_ID }}
+          QZAI_MAIN_APP_PRIVATE_KEY: ${{ secrets.QZAI_MAIN_APP_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          agent="$AGENT_ID"
+          app_id=""
+          key=""
+          case "$agent" in
+            afei) app_id="$QZAI_AFEI_APP_ID"; key="$QZAI_AFEI_APP_PRIVATE_KEY";;
+            aji) app_id="$QZAI_AJI_APP_ID"; key="$QZAI_AJI_APP_PRIVATE_KEY";;
+            jingwuming) app_id="$QZAI_JINGWUMING_APP_ID"; key="$QZAI_JINGWUMING_APP_PRIVATE_KEY";;
+            lengyan) app_id="$QZAI_LENGYAN_APP_ID"; key="$QZAI_LENGYAN_APP_PRIVATE_KEY";;
+            lixunhuan) app_id="$QZAI_LIXUNHUAN_APP_ID"; key="$QZAI_LIXUNHUAN_APP_PRIVATE_KEY";;
+            luxiaofeng) app_id="$QZAI_LUXIAOFENG_APP_ID"; key="$QZAI_LUXIAOFENG_APP_PRIVATE_KEY";;
+            main) app_id="$QZAI_MAIN_APP_ID"; key="$QZAI_MAIN_APP_PRIVATE_KEY";;
+            *) echo "::error::Fail-closed: unsupported agentId '$agent'"; exit 1;;
+          esac
+          if [[ -z "$app_id" || -z "$key" ]]; then
+            echo "::error::Fail-closed: missing secrets for agentId=$agent. Please set the corresponding QZAI_<AGENT>_APP_ID and QZAI_<AGENT>_APP_PRIVATE_KEY secrets."
+            exit 1
+          fi
+          echo "app_id=$app_id" >> "$GITHUB_OUTPUT"
+          {
+            echo "APP_PRIVATE_KEY<<'EOF'"
+            echo "$key"
+            echo "EOF"
+          } >> "$GITHUB_ENV"
+
       - name: Create GitHub App installation token
         if: steps.cmd.outputs.skip != '1'
         id: app-token
         uses: tibdex/github-app-token@v2
         with:
-          app_id: ${{ secrets.QZAI_APP_ID }}
-          private_key: ${{ secrets.QZAI_APP_PRIVATE_KEY }}
+          app_id: ${{ steps.sel.outputs.app_id }}
+          private_key: ${{ env.APP_PRIVATE_KEY }}
 
       - name: Resolve app + fail-closed authz
         if: steps.cmd.outputs.skip != '1'
@@ -94,8 +151,8 @@ jobs:
         env:
           APPS_JSON: ${{ steps.apps.outputs.appsJson }}
           AGENT_ID: ${{ steps.cmd.outputs.agentId }}
-          QZAI_APP_ID: ${{ secrets.QZAI_APP_ID }}
-          APP_PRIVATE_KEY: ${{ secrets.QZAI_APP_PRIVATE_KEY }}
+          QZAI_APP_ID: ${{ steps.sel.outputs.app_id }}
+          APP_PRIVATE_KEY: ${{ env.APP_PRIVATE_KEY }}
           INSTALLATION_ID: ${{ steps.app-token.outputs.installation_id }}
         with:
           github-token: ${{ steps.app-token.outputs.token }}
