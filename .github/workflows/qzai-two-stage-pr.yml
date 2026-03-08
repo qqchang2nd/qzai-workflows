@@ -94,26 +94,64 @@ jobs:
           github-token: ${{ steps.app-token.outputs.token }}
           script: |
             const apps = JSON.parse(process.env.APPS_JSON);
-            const agentId = process.env.AGENT_ID;
-            const rec = (apps.apps || []).find(a => a.agentId === agentId);
+            const agentId = String(process.env.AGENT_ID || '');
+
+            if (apps.version !== 1 || !apps.agents || typeof apps.agents !== 'object') {
+              core.setFailed('Fail-closed: .qzai/apps.json must be v8 schema: { version: 1, agents: { ... } }');
+              return;
+            }
+
+            const rec = apps.agents[agentId];
             if (!rec) {
-              core.setFailed(`Fail-closed: agentId not allowed (not found in .qzai/apps.json): ${agentId}`);
+              core.setFailed(`Fail-closed: agentId not allowed (not found in .qzai/apps.json agents map): ${agentId}`);
+              return;
+            }
+
+            const expectedSlug = String(rec.appSlug || '');
+            const expectedAppId = Number(rec.appId);
+            const expectedInstallationId = Number(rec.installationId);
+            if (!expectedSlug) {
+              core.setFailed(`Fail-closed: missing required field .qzai/apps.json agents.${agentId}.appSlug`);
+              return;
+            }
+            if (!Number.isFinite(expectedAppId) || expectedAppId <= 0) {
+              core.setFailed(`Fail-closed: invalid .qzai/apps.json agents.${agentId}.appId (must be positive number)`);
+              return;
+            }
+            if (!Number.isFinite(expectedInstallationId) || expectedInstallationId <= 0) {
+              core.setFailed(`Fail-closed: invalid .qzai/apps.json agents.${agentId}.installationId (must be positive number)`);
               return;
             }
 
             const app = await github.rest.apps.getAuthenticated();
-            const appSlug = app.data.slug;
-            const appId = Number(process.env.QZAI_APP_ID);
-            const installationId = Number(process.env.INSTALLATION_ID);
+            const actualSlug = String(app.data.slug || '');
+            const actualAppId = Number(process.env.QZAI_APP_ID);
+            const actualInstallationId = Number(process.env.INSTALLATION_ID);
 
-            if (rec.appSlug !== appSlug) {
-              core.setFailed(`Fail-closed: appSlug mismatch for agentId=${agentId}. expected=${rec.appSlug} actual=${appSlug}`);
+            if (expectedSlug !== actualSlug) {
+              core.setFailed(`Fail-closed: appSlug mismatch for agentId=${agentId}. expected=${expectedSlug} actual=${actualSlug}`);
+              return;
+            }
+            if (!Number.isFinite(actualAppId) || actualAppId <= 0) {
+              core.setFailed('Fail-closed: invalid runtime QZAI_APP_ID (must be positive number)');
+              return;
+            }
+            if (expectedAppId !== actualAppId) {
+              core.setFailed(`Fail-closed: appId mismatch for agentId=${agentId}. expected=${expectedAppId} actual=${actualAppId}`);
+              return;
+            }
+            if (!Number.isFinite(actualInstallationId) || actualInstallationId <= 0) {
+              core.setFailed('Fail-closed: invalid runtime installation_id from github-app-token');
+              return;
+            }
+            if (expectedInstallationId !== actualInstallationId) {
+              core.setFailed(`Fail-closed: installationId mismatch for agentId=${agentId}. expected=${expectedInstallationId} actual=${actualInstallationId}`);
               return;
             }
 
-            core.setOutput('appSlug', appSlug);
-            core.setOutput('appId', String(appId));
-            core.setOutput('installationId', String(installationId));
+            core.setOutput('appSlug', actualSlug);
+            core.setOutput('appId', String(actualAppId));
+            core.setOutput('installationId', String(actualInstallationId));
 
       - name: Ignore bot self-comment
         if: steps.cmd.outputs.skip != '1'
@@ -124,9 +162,11 @@ jobs:
         with:
           github-token: ${{ steps.app-token.outputs.token }}
           script: |
-            const botLogin = `${process.env.APP_SLUG}[bot]`;
             const actor = context.payload.sender?.login;
-            if (actor === botLogin) {
+            const me = await github.rest.users.getAuthenticated();
+            const myLogin = me?.data?.login;
+
+            if (actor && myLogin && actor === myLogin) {
               core.info(`Skip: ignore bot self comment to prevent loops: ${actor}`);
               core.setOutput('skip', '1');
             }
@@ -278,13 +318,19 @@ jobs:
               core.setFailed('Missing PLAN_SNAPSHOT_SHA from create-pull-request output.');
               return;
             }
+            const installationId = String(process.env.INSTALLATION_ID || '');
+            if (!installationId) {
+              core.setFailed('Fail-closed: missing installationId for plan attestation (A11).');
+              return;
+            }
+
             const summary = [
               `- planKey: \`${process.env.PLAN_KEY}\``,
               `- planSnapshotSha: \`${sha}\``,
               `- agentId: \`${process.env.AGENT_ID}\``,
               `- appSlug: \`${process.env.APP_SLUG}\``,
               `- appId: \`${process.env.APP_ID}\``,
-              `- installationId: \`${process.env.INSTALLATION_ID}\``
+              `- installationId: \`${installationId}\``
             ].join('\n');
 
             await github.rest.checks.create({
@@ -351,6 +397,7 @@ jobs:
           PLAN_URL: ${{ steps.cmd.outputs.planUrl }}
           APP_SLUG: ${{ steps.auth.outputs.appSlug }}
           APP_ID: ${{ steps.auth.outputs.appId }}
+          INSTALLATION_ID: ${{ steps.auth.outputs.installationId }}
         with:
           github-token: ${{ steps.app-token.outputs.token }}
           script: |
@@ -414,6 +461,7 @@ jobs:
             const summary = att.output.summary;
             const expectSlug = process.env.APP_SLUG;
             const expectId = String(process.env.APP_ID);
+            const expectInstallationId = String(process.env.INSTALLATION_ID);
             const expectPlanKey = planKey;
             const expectSha = planSnapshotSha;
             const expectAgentId = agentId;
@@ -423,7 +471,8 @@ jobs:
               `planSnapshotSha: \`${expectSha}\``,
               `agentId: \`${expectAgentId}\``,
               `appSlug: \`${expectSlug}\``,
-              `appId: \`${expectId}\``
+              `appId: \`${expectId}\``,
+              `installationId: \`${expectInstallationId}\``
             ];
             const missing = requiredSnippets.filter(s => !summary.includes(s));
             if (missing.length) {
