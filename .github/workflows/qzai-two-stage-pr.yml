@@ -194,7 +194,7 @@ jobs:
               core.warning(`eyes reaction failed: ${e.message}`);
             }
 
-      - name: PLAN: compute keys / idempotency
+      - name: "PLAN: compute keys / idempotency"
         if: steps.cmd.outputs.mode == 'plan' && steps.cmd.outputs.skip != '1' && steps.self.outputs.skip != '1'
         id: plan
         uses: actions/github-script@v7
@@ -241,7 +241,7 @@ jobs:
             core.setOutput('planKey', planKey);
             core.setOutput('branch', branch);
 
-      - name: PLAN: write meta + snapshot files
+      - name: "PLAN: write meta + snapshot files"
         if: steps.cmd.outputs.mode == 'plan' && steps.plan.outputs.skipCreate != '1' && steps.cmd.outputs.skip != '1' && steps.self.outputs.skip != '1'
         shell: bash
         env:
@@ -277,7 +277,7 @@ jobs:
           fs.writeFileSync(path.join('.qzai','plans',planKey,'snapshot.json'), JSON.stringify(snapshot,null,2)+"\n");
           NODE
 
-      - name: PLAN: create Plan PR (Meta + Snapshot)
+      - name: "PLAN: create Plan PR (Meta + Snapshot)"
         if: steps.cmd.outputs.mode == 'plan' && steps.plan.outputs.skipCreate != '1' && steps.cmd.outputs.skip != '1' && steps.self.outputs.skip != '1'
         id: cpr-plan
         uses: peter-evans/create-pull-request@v7
@@ -304,7 +304,7 @@ jobs:
             .qzai/plans/${{ steps.plan.outputs.planKey }}/meta.json
             .qzai/plans/${{ steps.plan.outputs.planKey }}/snapshot.json
 
-      - name: PLAN: attestation check-run
+      - name: "PLAN: attestation check-run"
         if: steps.cmd.outputs.mode == 'plan' && steps.plan.outputs.skipCreate != '1' && steps.cmd.outputs.skip != '1' && steps.self.outputs.skip != '1'
         uses: actions/github-script@v7
         env:
@@ -349,7 +349,7 @@ jobs:
               output: { title: 'QZAI Plan Attestation', summary }
             });
 
-      - name: PLAN: persist planSnapshotSha to PR body
+      - name: "PLAN: persist planSnapshotSha to PR body"
         if: steps.cmd.outputs.mode == 'plan' && steps.plan.outputs.skipCreate != '1' && steps.cmd.outputs.skip != '1' && steps.self.outputs.skip != '1'
         uses: actions/github-script@v7
         env:
@@ -369,7 +369,7 @@ jobs:
             const next = `${body.trimEnd()}\n- planSnapshotSha: \`${sha}\`\n`;
             await github.rest.pulls.update({ owner, repo, pull_number, body: next });
 
-      - name: PLAN: comment back result
+      - name: "PLAN: comment back result"
         if: steps.cmd.outputs.mode == 'plan' && steps.cmd.outputs.skip != '1' && steps.self.outputs.skip != '1'
         uses: actions/github-script@v7
         env:
@@ -394,7 +394,7 @@ jobs:
             ];
             await github.rest.issues.createComment({ owner, repo, issue_number: issueNumber, body: lines.join('\n') });
 
-      - name: IMPL: validate plan + compute keys
+      - name: "IMPL: validate plan + compute keys"
         if: steps.cmd.outputs.mode == 'impl' && steps.cmd.outputs.skip != '1' && steps.self.outputs.skip != '1'
         id: impl
         uses: actions/github-script@v7
@@ -541,7 +541,7 @@ jobs:
             core.setOutput('branch', branch);
             core.setOutput('implKey', implKey);
 
-      - name: IMPL: write meta file
+      - name: "IMPL: write meta file"
         if: steps.cmd.outputs.mode == 'impl' && steps.impl.outputs.skipCreate != '1' && steps.cmd.outputs.skip != '1' && steps.self.outputs.skip != '1'
         shell: bash
         env:
@@ -567,7 +567,7 @@ jobs:
           fs.writeFileSync(path.join('.qzai','impls',process.env.IMPL_KEY,'meta.json'), JSON.stringify(meta,null,2)+"\n");
           NODE
 
-      - name: IMPL: create Impl PR
+      - name: "IMPL: create Impl PR"
         if: steps.cmd.outputs.mode == 'impl' && steps.impl.outputs.skipCreate != '1' && steps.cmd.outputs.skip != '1' && steps.self.outputs.skip != '1'
         id: cpr-impl
         uses: peter-evans/create-pull-request@v7
@@ -597,7 +597,7 @@ jobs:
           add-paths: |
             .qzai/impls/${{ steps.impl.outputs.implKey }}/meta.json
 
-      - name: IMPL: comment back result
+      - name: "IMPL: comment back result"
         if: steps.cmd.outputs.mode == 'impl' && steps.cmd.outputs.skip != '1' && steps.self.outputs.skip != '1'
         uses: actions/github-script@v7
         env:
