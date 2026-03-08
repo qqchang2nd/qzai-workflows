@@ -129,9 +129,11 @@ jobs:
               return;
             }
 
-            const app = await github.rest.apps.getAuthenticated();
-            const actualSlug = String(app.data.slug || '');
-            const actualAppId = Number(process.env.QZAI_APP_ID);
+            // NOTE: Installation tokens cannot call GET /app (apps.getAuthenticated).
+            // Use GET /installation to discover the app identity for this token.
+            const installation = await github.request('GET /installation');
+            const actualSlug = String(installation.data.app_slug || '');
+            const actualAppId = Number(installation.data.app_id);
             const actualInstallationId = Number(process.env.INSTALLATION_ID);
 
             if (expectedSlug !== actualSlug) {
