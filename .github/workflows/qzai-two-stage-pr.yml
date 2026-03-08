@@ -37,7 +37,7 @@ jobs:
             const raw = fs.readFileSync(p, 'utf8');
             core.setOutput('appsJson', raw);
 
-      - name: Parse command (strict first line)
+      - name: Parse command (normalized first line)
         id: cmd
         uses: actions/github-script@v7
         with:
@@ -45,10 +45,16 @@ jobs:
             const body = String(context.payload.comment?.body || '');
             const firstLine = body.split(/\r?\n/)[0] || '';
 
-            const isPlan = firstLine.trim() === '/qzai plan-pr';
-            const isImpl = firstLine.trim() === '/qzai impl-pr';
+            // Normalize to avoid command "black hole" across wrappers:
+            // - take first line
+            // - trim
+            // - collapse all whitespace runs into a single space
+            const normalized = firstLine.trim().replace(/\s+/g, ' ');
+
+            const isPlan = normalized === '/qzai plan-pr';
+            const isImpl = normalized === '/qzai impl-pr';
             if (!isPlan && !isImpl) {
-              core.info('Skip: first line is not an exact /qzai plan-pr or /qzai impl-pr');
+              core.info('Skip: first line is not a normalized /qzai plan-pr or /qzai impl-pr');
               core.setOutput('skip', '1');
               return;
             }
@@ -458,9 +464,35 @@ jobs:
               core.setFailed('Fail-closed: missing qzai/plan-attestation check-run on planSnapshotSha.');
               return;
             }
+
+            // Must-fix: close the issuer loop.
+            // A same-named check-run could be forged by other workflows/apps with checks:write.
+            // We must verify the creating App identity matches the expected GitHub App.
+            const expectSlug = String(process.env.APP_SLUG || '');
+            const expectAppIdNum = Number(process.env.APP_ID);
+            if (!expectSlug) {
+              core.setFailed('Fail-closed: missing expected APP_SLUG at runtime.');
+              return;
+            }
+            if (!Number.isFinite(expectAppIdNum) || expectAppIdNum <= 0) {
+              core.setFailed('Fail-closed: invalid expected APP_ID at runtime (must be positive number).');
+              return;
+            }
+
+            const attApp = att.app;
+            const attAppId = Number(attApp?.id);
+            const attAppSlug = String(attApp?.slug || '');
+            if (!Number.isFinite(attAppId) || attAppId <= 0 || !attAppSlug) {
+              core.setFailed(`Fail-closed: attestation check-run has no app identity. got app.id=${attApp?.id} app.slug=${attApp?.slug}`);
+              return;
+            }
+            if (attAppId !== expectAppIdNum || attAppSlug !== expectSlug) {
+              core.setFailed(`Fail-closed: attestation issuer mismatch. expected app.id=${expectAppIdNum} app.slug=${expectSlug}; got app.id=${attAppId} app.slug=${attAppSlug}`);
+              return;
+            }
+
             const summary = att.output.summary;
-            const expectSlug = process.env.APP_SLUG;
-            const expectId = String(process.env.APP_ID);
+            const expectId = String(expectAppIdNum);
             const expectInstallationId = String(process.env.INSTALLATION_ID);
             const expectPlanKey = planKey;
             const expectSha = planSnapshotSha;
