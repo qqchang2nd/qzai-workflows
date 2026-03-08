@@ -47,6 +47,45 @@
 
 ---
 
+## Plan PR 触发策略（按 Issue 类型，P0 规则）
+
+> 目标：减少“到底要不要开 Plan PR”的人为争论，让流程可执行。
+
+### 1) Feat 类 Issue：一律开 Plan PR
+
+适用标签/类型（建议用 label 作为唯一裁决信号）：
+- `type:feat` / `enhancement` / `refactor` / `breaking-change`（或同等语义标签）
+
+规则：
+- **必须开 Plan PR**：用 `/qzai plan-pr` 创建 Plan PR，把设计/方案落实到文档（Plan PR 即文档载体）。
+- Plan PR 的核心交付物：目标/范围/非目标/方案/风险/回滚/验收口径（DoD）。
+
+原因：Feat 的不确定性更高，Plan PR 能把关键决策沉淀为可引用的审计证据，避免边做边改、口头决策丢失。
+
+### 2) Bug 类 Issue：默认不开 Plan PR
+
+适用标签/类型：
+- `type:bug` / `bug`
+
+规则：
+- **默认不开 Plan PR**。
+- 直接在 Issue 内完成“修复计划 + 验证方式”的评论闭环即可（复现 → 根因 → 修复 → 回归）。
+
+Bug 的价值在速度与闭环，Plan PR 往往只增加延迟。
+
+#### Bug 例外：高风险/复杂 bug 仍建议开 Plan PR
+
+满足其一就建议转为 Plan PR 流：
+- 影响面大（跨模块/跨 repo）
+- 需要灰度/回滚方案
+- 需要多方协作/明确责任边界
+- 可能引入行为改变（看起来像 bug，实际上是设计讨论）
+
+操作建议：
+- 先把 Issue label 从 `type:bug` 调整为 `type:feat/enhancement`（或补充 `needs-design`），再走 Plan PR。
+
+---
+
 ## 看板（Projects）联动（最小约定）
 
 原则：**Issue 是真相源（SSOT），看板只是投影**。
@@ -58,6 +97,7 @@
 
 当前阶段：我们先以 label 作为唯一驱动源；Project 同步能力后续由 `/qzai` 自动化补齐。
 
+---
 
 ## 强制规则（不满足即不合并）
 
@@ -100,6 +140,8 @@
 不允许（除非 Master 明确要求）：
 - 引入实际业务代码变更
 - 大规模重构
+
+---
 
 ## 最小实例
 
