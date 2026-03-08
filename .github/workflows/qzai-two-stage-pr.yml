@@ -146,12 +146,23 @@ jobs:
             const sig = crypto.createSign('RSA-SHA256').update(toSign).sign(privateKey).toString('base64url');
             const jwt = `${toSign}.${sig}`;
 
-            const appResp = await github.request('GET /app', {
-              headers: { authorization: `Bearer ${jwt}` },
+            const resp = await fetch('https://api.github.com/app', {
+              method: 'GET',
+              headers: {
+                'Authorization': `Bearer ${jwt}`,
+                'Accept': 'application/vnd.github+json',
+                'X-GitHub-Api-Version': '2022-11-28',
+              },
             });
+            if (!resp.ok) {
+              const body = await resp.text();
+              core.setFailed(`Fail-closed: GET /app via App JWT failed: HTTP ${resp.status} ${body}`);
+              return;
+            }
+            const appData = await resp.json();
 
-            const actualSlug = String(appResp.data.slug || '');
-            const actualAppId = Number(appResp.data.id);
+            const actualSlug = String(appData.slug || '');
+            const actualAppId = Number(appData.id);
             const actualInstallationId = Number(process.env.INSTALLATION_ID);
 
             if (expectedSlug !== actualSlug) {
