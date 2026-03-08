@@ -1,0 +1,12 @@
+{
+  "$schema": "https://example.com/qzai-apps.schema.json",
+  "version": 1,
+  "apps": [
+    {
+      "agentId": "luxiaofeng",
+      "appSlug": "qzai-afei",
+      "appIdEnv": "QZAI_APP_ID",
+      "privateKeyEnv": "QZAI_APP_PRIVATE_KEY"
+    }
+  ]
+}
