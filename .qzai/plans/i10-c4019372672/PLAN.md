@@ -9,7 +9,10 @@
 - Feedback-2（解释 `review-id` 与 `mode`）  
   https://github.com/qqchang2nd/qzai-workflows/pull/29#discussion_r2902091025
 
-本版结论：两条均 **采纳**。
+- Feedback-3（reviewer→owner 反馈闭环）  
+  https://github.com/qqchang2nd/qzai-workflows/pull/29#issuecomment-4020298707
+
+本版结论：三条均 **采纳**。
 
 ---
 
@@ -72,6 +75,28 @@ note: <optional>
 - 仅 Owner/MEMBER/COLLABORATOR 或 `permission>=write` 用户。
 - review-bot 不应自发发送该命令（避免自触发闭环）。
 
+## 2.3 reviewer -> owner 反馈闭环（新增）
+
+reviewer 给出评论后，owner 的回应路径固定为三步：
+
+1. **选择动作**：Owner 发送 `/qzai apply-review`（`mode=apply|partial|reject`）。
+2. **执行回应**（仅 `apply/partial`）：
+   - 提交修复 commit（对应 reviewer 建议）；
+   - 在对应 review 线程回复（`resolved by <commit_sha>` 或明确不采纳理由）；
+3. **确认完成**：Owner 发送重审命令：
+
+```text
+/qzai re-review
+agentId: <required>
+review-id: <required>
+head-sha: <optional, default current PR head>
+```
+
+说明：
+- `/qzai re-review` 只能在 `apply_requested` 或 `partial_applied` 后触发；
+- 触发后进入新一轮 `reviewing`，并把 `parentReviewId=<review-id>` 写入 attestation；
+- 若 owner 只回复线程但没有新 commit，允许重审，但 check-run 标记 `NO_CODE_CHANGE_RECHECK=true`。
+
 ---
 
 ## 3) 触发机制与互斥（避免双触发）
@@ -116,10 +141,13 @@ note: <optional>
 
 ## 5.1 状态机（最小）
 `requested -> reviewing -> reviewed -> apply_requested -> applied`  
+闭环扩展：
+- `applied -> re_review_requested -> reviewing -> reviewed`（owner 主动重审）
+
 等价终态：
 - `rejected`（mode=reject）
-- `partial_applied`（mode=partial）
-- `timeout`（reviewed 后超时未决）
+- `partial_applied`（mode=partial，随后可 `re_review_requested`）
+- `timeout`（reviewed 或 apply_requested 后超时未决）
 
 ## 5.2 幂等键
 - `reviewKey = <repo>#<pr>#<headSha>#<agentId>`
@@ -128,6 +156,7 @@ note: <optional>
 规则：
 - 同 `reviewKey` 重复 `/qzai review`：复用已存在 review 轮次，不重复发起。
 - 同 `decisionKey` 重复 `/qzai apply-review`：仅首个生效，后续回帖“已处理”。
+- 重审幂等：`reReviewKey = <reviewId>#<headSha>#<agentId>`，同 key 重复 `/qzai re-review` 不重复触发。
 
 ---
 
@@ -169,6 +198,15 @@ agentId: unknown-bot
 
 ---
 
+
+## 示例 D：Owner 线程回复后发起重审
+```text
+/qzai re-review
+agentId: luxiaofeng
+review-id: rvw_29_d955d43_luxiaofeng_1
+```
+期望：进入 `re_review_requested->reviewing->reviewed`，并在 attestation 记录 `parentReviewId`。
+
 ## 8) 最小可行 DoD（MVP）
 
 1. 触发不依赖 @mention，仅来自 `issue_comment` slash。  
@@ -177,4 +215,5 @@ agentId: unknown-bot
 4. 提供 2~3 个端到端命令例子（含失败返回）。  
 5. 状态机与幂等键可落地、可审计。  
 6. 与现有 plan/impl/issue wrappers 的路由互斥规则明确。  
-7. 全链路 App 身份要求与 fail-closed 门禁明确。
+7. reviewer 评论后的 owner 反馈闭环明确（commit修复 + 线程回复 + re-review）。  
+8. 全链路 App 身份要求与 fail-closed 门禁明确。
