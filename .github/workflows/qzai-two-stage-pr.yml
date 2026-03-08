@@ -129,11 +129,13 @@ jobs:
               return;
             }
 
-            // NOTE: Installation tokens cannot call GET /app (apps.getAuthenticated).
-            // Use GET /installation to discover the app identity for this token.
-            const installation = await github.request('GET /installation');
-            const actualSlug = String(installation.data.app_slug || '');
-            const actualAppId = Number(installation.data.app_id);
+            // NOTE: Installation tokens cannot call GET /app.
+            // Derive app identity via GET /user (installation token identifies as the app bot user).
+            const me = await github.rest.users.getAuthenticated();
+            const myLogin = String(me?.data?.login || '');
+            // API login may include a "[bot]" suffix; normalize to app slug.
+            const actualSlug = myLogin.replace(/\[bot\]$/i, '');
+            const actualAppId = Number(process.env.QZAI_APP_ID);
             const actualInstallationId = Number(process.env.INSTALLATION_ID);
 
             if (expectedSlug !== actualSlug) {
