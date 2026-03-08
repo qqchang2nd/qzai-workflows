@@ -66,13 +66,20 @@ jobs:
 
 由 `qzai-two-stage-pr-wrapper.yml` → `qzai-two-stage-pr.yml` 处理。
 
+#### 命令解析规则（重要）
+
+- 仅解析评论**第一行**作为命令行；会先做空白归一化（trim + 连续空白折叠为单空格）。
+- 第一行必须精确匹配：`/qzai plan-pr` 或 `/qzai impl-pr`，否则工作流会直接跳过。
+
+
 - `/qzai plan-pr`
   - 触发：Issue 评论
   - 必填字段：`agentId: <agentId>`
   - 作用：创建 Plan PR（沉淀计划文档快照 + attestation check-run）
 
 - `/qzai impl-pr`
-  - 触发：Plan PR 线程的评论（PR conversation）
+  - 触发：PR conversation（即 PR 线程的评论，issue_comment on PR）。
+  - 推荐：在对应的 Plan PR 线程触发；实现上允许在**任意** PR 线程触发，只要 `plan:` 指向同仓库的 Plan PR 链接。
   - 必填字段：
     - `agentId: <agentId>`
     - `plan: <Plan PR URL>`
