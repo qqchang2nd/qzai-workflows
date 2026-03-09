@@ -687,6 +687,8 @@ jobs:
             core.setOutput('implKey', implKey);
             core.setOutput('planAgentId', planAgentId);
             core.setOutput('implAgentId', agentId);
+            core.setOutput('planAgentId', planAgentId);
+            core.setOutput('implAgentId', agentId);
 
       - name: "IMPL: write meta file"
         if: steps.cmd.outputs.mode == 'impl' && steps.impl.outputs.skipCreate != '1' && steps.cmd.outputs.skip != '1' && steps.self.outputs.skip != '1'
