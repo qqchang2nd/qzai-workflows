@@ -12,7 +12,10 @@
 - Feedback-3（reviewer→owner 反馈闭环）  
   https://github.com/qqchang2nd/qzai-workflows/pull/29#issuecomment-4020298707
 
-本版结论：三条均 **采纳**。
+- Feedback-4（通知机制 + /qzai re-review 收敛）  
+  https://github.com/qqchang2nd/qzai-workflows/pull/29#issuecomment-4020312169
+
+本版结论：四条均 **采纳**。
 
 ---
 
@@ -75,27 +78,52 @@ note: <optional>
 - 仅 Owner/MEMBER/COLLABORATOR 或 `permission>=write` 用户。
 - review-bot 不应自发发送该命令（避免自触发闭环）。
 
-## 2.3 reviewer -> owner 反馈闭环（新增）
+## 2.3 reviewer -> owner 反馈闭环（更新）
 
-reviewer 给出评论后，owner 的回应路径固定为三步：
+reviewer 给出评论后，owner（PR 发起者）的回应路径固定为三步：
 
-1. **选择动作**：Owner 发送 `/qzai apply-review`（`mode=apply|partial|reject`）。
-2. **执行回应**（仅 `apply/partial`）：
-   - 提交修复 commit（对应 reviewer 建议）；
-   - 在对应 review 线程回复（`resolved by <commit_sha>` 或明确不采纳理由）；
-3. **确认完成**：Owner 发送重审命令：
+1. **通知触达（主方案）**：review-bot 完成 review 后，自动在 PR conversation 发一条 `issue_comment` 通知（摘要 + next actions）。
+2. **owner 决策动作**：Owner 发送 `/qzai apply-review`（`mode=apply|partial|reject`）。
+3. **重审触发（命令收敛）**：不新增 `/qzai re-review`，统一复用 `/qzai review`。
+
+### 通知机制（不依赖 @mention）
+
+主方案（A）：**自动 issue_comment 通知**（MUST）
+- 触发时机：review 进入 `reviewed` 后立即发送。
+- 通知内容最小字段：
+  - `reviewId`
+  - 评论摘要（按严重级别分组）
+  - 未处理项计数
+  - 下一步命令提示：`/qzai apply-review ...`
+
+Fallback（B）：**check-run + required status**（SHOULD）
+- `qzai/review-attestation` 作为 required check，使 owner 在 PR checks 视图可见待处理状态。
+
+可选兜底（C）：手动拉取命令（COULD）
+- `/qzai review-summary` 拉取未处理 comments 摘要；仅作为补救路径，不作为主触达机制。
+
+### `/qzai review` 覆盖重审场景（采纳反馈-4）
+
+`/qzai review` 新增可选参数：
 
 ```text
-/qzai re-review
+/qzai review
 agentId: <required>
-review-id: <required>
-head-sha: <optional, default current PR head>
+mode: <optional: initial|rerun|followup>
+review-id: <optional, required when mode=followup>
+scope: <optional>
+focus: <optional>
 ```
 
-说明：
-- `/qzai re-review` 只能在 `apply_requested` 或 `partial_applied` 后触发；
-- 触发后进入新一轮 `reviewing`，并把 `parentReviewId=<review-id>` 写入 attestation；
-- 若 owner 只回复线程但没有新 commit，允许重审，但 check-run 标记 `NO_CODE_CHANGE_RECHECK=true`。
+规则：
+- 首次评审：`mode=initial`（默认）。
+- 重跑同一轮（代码更新后）：`mode=rerun`。
+- 跟进指定轮次：`mode=followup` + `review-id`（必填）。
+- 因此不再需要独立 `/qzai re-review` 命令。
+
+### 谁可发出 `/qzai apply-review`
+- 仅 Owner/MEMBER/COLLABORATOR 或 `permission>=write` 用户。
+- review-bot 不应自发发送该命令（避免自触发闭环）。
 
 ---
 
@@ -142,11 +170,11 @@ head-sha: <optional, default current PR head>
 ## 5.1 状态机（最小）
 `requested -> reviewing -> reviewed -> apply_requested -> applied`  
 闭环扩展：
-- `applied -> re_review_requested -> reviewing -> reviewed`（owner 主动重审）
+- `applied -> review_requested(mode=rerun|followup) -> reviewing -> reviewed`
 
 等价终态：
 - `rejected`（mode=reject）
-- `partial_applied`（mode=partial，随后可 `re_review_requested`）
+- `partial_applied`（mode=partial，随后可 `review_requested`）
 - `timeout`（reviewed 或 apply_requested 后超时未决）
 
 ## 5.2 幂等键
@@ -154,9 +182,9 @@ head-sha: <optional, default current PR head>
 - `decisionKey = <reviewId>#<mode>`
 
 规则：
-- 同 `reviewKey` 重复 `/qzai review`：复用已存在 review 轮次，不重复发起。
+- 同 `reviewKey` 重复 `/qzai review`（mode=initial）：复用已存在 review 轮次，不重复发起。
+- `/qzai review` 在 `mode=rerun|followup` 下使用 `rerunKey = <reviewId>#<headSha>#<agentId>#<mode>` 去重。
 - 同 `decisionKey` 重复 `/qzai apply-review`：仅首个生效，后续回帖“已处理”。
-- 重审幂等：`reReviewKey = <reviewId>#<headSha>#<agentId>`，同 key 重复 `/qzai re-review` 不重复触发。
 
 ---
 
@@ -215,5 +243,6 @@ review-id: rvw_29_d955d43_luxiaofeng_1
 4. 提供 2~3 个端到端命令例子（含失败返回）。  
 5. 状态机与幂等键可落地、可审计。  
 6. 与现有 plan/impl/issue wrappers 的路由互斥规则明确。  
-7. reviewer 评论后的 owner 反馈闭环明确（commit修复 + 线程回复 + re-review）。  
-8. 全链路 App 身份要求与 fail-closed 门禁明确。
+7. reviewer 评论后的 owner 反馈闭环明确（自动通知 + apply-review 决策 + `/qzai review` 复跑）。  
+8. 明确不依赖 @mention：主通知为 review-bot 自动 issue_comment，check-run 为 fallback。  
+9. 全链路 App 身份要求与 fail-closed 门禁明确。
