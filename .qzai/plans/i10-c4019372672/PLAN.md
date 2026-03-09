@@ -66,7 +66,7 @@ note: <optional>
 ```
 
 `apply-review` 的含义是“Owner 对本轮 review 给出处理决策”，并触发后续执行要求：
-- `mode=apply|partial`：Owner 必须完成两件事后才可进入重审：
+- `mode=apply|partial`：状态进入 `awaiting_owner_changes`；Owner 必须完成两件事后才进入 `applied`（或随后触发 rerun/followup）：
   1) 提交修复 commit；
   2) 在对应 review 线程回复处理结果（含 commit sha 或不采纳理由）。
 - `mode=reject`：流程直接进入 `rejected` 终态。
@@ -105,7 +105,7 @@ reviewer 给出评论后，owner（PR 发起者）的回应路径固定为三步
   - `headSha`
   - `summaryBySeverity`（high/medium/low 计数）
   - `unresolvedCount`
-  - `nextAction`（固定提示 `/qzai apply-review ...`）
+  - `nextAction`（可复制模板，示例：`/qzai apply-review\nagentId: <agentId>\nreview-id: <reviewId>\nmode: <apply|partial|reject>`）
   - `attestationUrl`（指向 `qzai/review-attestation`）
 
 Fallback（B）：**check-run + required status**（SHOULD）
@@ -223,7 +223,7 @@ agentId: luxiaofeng
 review-id: rvw_29_a733aad_luxiaofeng_1
 mode: apply
 ```
-期望：进入 `apply_requested->applied`。
+期望：进入 `apply_requested->awaiting_owner_changes`；owner 完成 commit+线程回复后进入 `applied`。
 
 ## 示例 C：失败（无权限或 agentId 非法）
 ```text
@@ -235,13 +235,14 @@ agentId: unknown-bot
 ---
 
 
-## 示例 D：Owner 线程回复后发起重审
+## 示例 D：Owner 线程回复后发起重审（复用 `/qzai review`）
 ```text
-/qzai re-review
+/qzai review
 agentId: luxiaofeng
+mode: followup
 review-id: rvw_29_d955d43_luxiaofeng_1
 ```
-期望：进入 `re_review_requested->reviewing->reviewed`，并在 attestation 记录 `parentReviewId`。
+期望：进入 `review_requested(mode=followup)->reviewing->reviewed`，并在 attestation 记录 `parentReviewId`。
 
 ## 8) 最小可行 DoD（MVP）
 
