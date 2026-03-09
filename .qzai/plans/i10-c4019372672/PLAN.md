@@ -33,6 +33,8 @@
 2. 不依赖 GitHub `@mention` 作为触发机制。
 3. 不在本版支持代码行内 review comment 触发。
 
+Owner 定义：**Owner = 当前 PR author（发起者）**，不是 repo owner。
+
 ---
 
 ## 2) 命令协议（统一使用 `agentId`）
@@ -63,6 +65,12 @@ mode: <required: apply|reject|partial>
 note: <optional>
 ```
 
+`apply-review` 的含义是“Owner 对本轮 review 给出处理决策”，并触发后续执行要求：
+- `mode=apply|partial`：Owner 必须完成两件事后才可进入重审：
+  1) 提交修复 commit；
+  2) 在对应 review 线程回复处理结果（含 commit sha 或不采纳理由）。
+- `mode=reject`：流程直接进入 `rejected` 终态。
+
 ### `review-id` 定义（采纳反馈-2）
 - 含义：一次已完成 review 轮次的唯一标识。  
 - 生成时机：`/qzai review` 进入 `reviewed` 状态后由系统生成。  
@@ -74,7 +82,7 @@ note: <optional>
 - `reject`：Owner 明确拒绝本轮建议，流程收敛为 rejected。  
 - `partial`：Owner 部分采纳，需在 `note` 写范围。
 
-### 谁可发出 `/qzai apply-review`
+### 触发权限（apply-review）
 - 仅 Owner/MEMBER/COLLABORATOR 或 `permission>=write` 用户。
 - review-bot 不应自发发送该命令（避免自触发闭环）。
 
@@ -90,11 +98,15 @@ reviewer 给出评论后，owner（PR 发起者）的回应路径固定为三步
 
 主方案（A）：**自动 issue_comment 通知**（MUST）
 - 触发时机：review 进入 `reviewed` 后立即发送。
-- 通知内容最小字段：
+- 发送者：对应 `agentId` 的 review-bot GitHub App 身份（MUST）。
+- 通知内容 schema（MUST）：
   - `reviewId`
-  - 评论摘要（按严重级别分组）
-  - 未处理项计数
-  - 下一步命令提示：`/qzai apply-review ...`
+  - `prNumber`
+  - `headSha`
+  - `summaryBySeverity`（high/medium/low 计数）
+  - `unresolvedCount`
+  - `nextAction`（固定提示 `/qzai apply-review ...`）
+  - `attestationUrl`（指向 `qzai/review-attestation`）
 
 Fallback（B）：**check-run + required status**（SHOULD）
 - `qzai/review-attestation` 作为 required check，使 owner 在 PR checks 视图可见待处理状态。
@@ -120,10 +132,6 @@ focus: <optional>
 - 重跑同一轮（代码更新后）：`mode=rerun`。
 - 跟进指定轮次：`mode=followup` + `review-id`（必填）。
 - 因此不再需要独立 `/qzai re-review` 命令。
-
-### 谁可发出 `/qzai apply-review`
-- 仅 Owner/MEMBER/COLLABORATOR 或 `permission>=write` 用户。
-- review-bot 不应自发发送该命令（避免自触发闭环）。
 
 ---
 
@@ -168,7 +176,7 @@ focus: <optional>
 ## 5) 状态机与幂等
 
 ## 5.1 状态机（最小）
-`requested -> reviewing -> reviewed -> apply_requested -> applied`  
+`requested -> reviewing -> reviewed -> apply_requested -> awaiting_owner_changes -> applied`  
 闭环扩展：
 - `applied -> review_requested(mode=rerun|followup) -> reviewing -> reviewed`
 
