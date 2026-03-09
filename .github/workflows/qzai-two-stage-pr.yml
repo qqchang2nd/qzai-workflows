@@ -587,10 +587,11 @@ jobs:
             const planKey = planKeyMatch[1].trim();
             const planAgentId = agentIdMatch[1].trim();
             const issueNumber = Number(refsMatch[1]);
-            if (planAgentId !== agentId) {
-              core.setFailed(`Fail-closed: agentId mismatch. command=${agentId} planPR=${planAgentId}`);
-              return;
-            }
+            // Allow different agentIds for plan and impl stages (fix #31)
+            // if (planAgentId !== agentId) {
+            //   core.setFailed(`Fail-closed: agentId mismatch. command=${agentId} planPR=${planAgentId}`);
+            //   return;
+            // }
 
             let planSnapshotSha = planPr.data.head?.sha || '';
             if (!planSnapshotSha) {
@@ -684,6 +685,8 @@ jobs:
             core.setOutput('issueNumber', String(issueNumber));
             core.setOutput('branch', branch);
             core.setOutput('implKey', implKey);
+            core.setOutput('planAgentId', planAgentId);
+            core.setOutput('implAgentId', agentId);
 
       - name: "IMPL: write meta file"
         if: steps.cmd.outputs.mode == 'impl' && steps.impl.outputs.skipCreate != '1' && steps.cmd.outputs.skip != '1' && steps.self.outputs.skip != '1'
@@ -694,6 +697,8 @@ jobs:
           PLAN_SNAPSHOT_SHA: ${{ steps.impl.outputs.planSnapshotSha }}
           ISSUE_NUMBER: ${{ steps.impl.outputs.issueNumber }}
           PLAN_URL: ${{ steps.cmd.outputs.planUrl }}
+          PLAN_AGENT_ID: ${{ steps.impl.outputs.planAgentId }}
+          IMPL_AGENT_ID: ${{ steps.impl.outputs.implAgentId }}
         run: |
           set -euo pipefail
           mkdir -p ".qzai/impls/$IMPL_KEY"
@@ -706,6 +711,8 @@ jobs:
             planSnapshotSha: process.env.PLAN_SNAPSHOT_SHA,
             issueNumber: Number(process.env.ISSUE_NUMBER),
             planUrl: process.env.PLAN_URL,
+            planAgentId: process.env.PLAN_AGENT_ID,
+            implAgentId: process.env.IMPL_AGENT_ID,
             createdAt: new Date().toISOString(),
           };
           fs.writeFileSync(path.join('.qzai','impls',process.env.IMPL_KEY,'meta.json'), JSON.stringify(meta,null,2)+"\n");
@@ -732,7 +739,8 @@ jobs:
             - implKey: `${{ steps.impl.outputs.implKey }}`
             - planKey: `${{ steps.impl.outputs.planKey }}`
             - planSnapshotSha: `${{ steps.impl.outputs.planSnapshotSha }}`
-            - agentId: `${{ steps.cmd.outputs.agentId }}`
+            - planAgentId: `${{ steps.impl.outputs.planAgentId }}`
+            - implAgentId: `${{ steps.cmd.outputs.agentId }}`
             - requestedBy: @${{ github.actor }}
             - sourceComment: ${{ github.event.comment.html_url }}
 
@@ -747,6 +755,8 @@ jobs:
         env:
           PR_URL: ${{ steps.cpr-impl.outputs.pull-request-url || steps.impl.outputs.existingPrUrl }}
           PLAN_URL: ${{ steps.cmd.outputs.planUrl }}
+          PLAN_AGENT_ID: ${{ steps.impl.outputs.planAgentId }}
+          IMPL_AGENT_ID: ${{ steps.cmd.outputs.agentId }}
         with:
           github-token: ${{ steps.app-token.outputs.token }}
           script: |
@@ -754,6 +764,9 @@ jobs:
             const repo = context.repo.repo;
             const prIssueNumber = context.payload.issue.number;
             const url = process.env.PR_URL;
+            const planUrl = process.env.PLAN_URL;
+            const planAgentId = process.env.PLAN_AGENT_ID;
+            const implAgentId = process.env.IMPL_AGENT_ID;
             await github.rest.issues.createComment({
               owner,
               repo,
@@ -761,7 +774,9 @@ jobs:
               body: [
                 '### ✅ QZAI impl-pr',
                 url ? `Impl PR: ${url}` : 'Impl PR: (unknown)',
-                `Plan: ${process.env.PLAN_URL}`
+                `Plan: ${planUrl}`,
+                `Plan Agent ID: ${planAgentId}`,
+                `Impl Agent ID: ${implAgentId}`
               ].join('\n')
             });
 
