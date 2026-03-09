@@ -99,7 +99,7 @@ reviewer 给出评论后，owner（PR 发起者）的回应路径固定为三步
 - Reviewer = 执行 review 的 agent（可与 Owner 不同）。示例：`qzai`。
 - Master = 监督/裁决角色。示例：`qqchang2nd`。
 
-关键约束：Master 不作为主链路消息总线；主链路触达由 review-bot 自动通知完成。
+关键约束（MUST）：Master 不作为主链路消息总线；主链路触达必须由 review-bot 自动通知完成。
 
 ### 通知机制（不依赖 @mention）
 
