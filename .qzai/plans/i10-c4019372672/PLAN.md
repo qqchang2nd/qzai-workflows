@@ -65,11 +65,11 @@ mode: <required: apply|reject|partial>
 note: <optional>
 ```
 
-`apply-review` 的含义是“Owner 对本轮 review 给出处理决策（承诺事件）”，使用时机为：收到 review-bot 自动通知后，由 Owner（或具备 write 权限者）发起。
-- `mode=apply|partial`：状态进入 `awaiting_owner_changes`；Owner 必须完成两件事后才进入 `applied`（或随后触发 rerun/followup）：
-  1) 提交修复 commit；
-  2) 在对应 review 线程回复处理结果（含 commit sha 或不采纳理由）。
-- `mode=reject`：流程直接进入 `rejected` 终态。
+`apply-review` 的含义是“Owner 对本轮 review 给出处理决策（承诺事件）”，使用时机为：收到 review-bot 自动通知后、准备开始修改前，由 Owner（或具备 write 权限者）发起。
+- `mode=apply|partial`：状态**必须**进入 `awaiting_owner_changes`；Owner 满足完成条件后进入 `applied`（随后可触发 rerun/followup）：
+  1) 提交修复 commit（MUST）；
+  2) 在对应 review 线程回复处理结果（MUST，含 commit sha 或不采纳理由）。
+- `mode=reject`：流程直接进入 `rejected` 终态（MUST）。
 
 ### `review-id` 定义（采纳反馈-2）
 - 含义：一次已完成 review 轮次的唯一标识。  
@@ -90,8 +90,8 @@ note: <optional>
 
 reviewer 给出评论后，owner（PR 发起者）的回应路径固定为三步：
 
-1. **通知触达（主方案）**：review-bot 完成 review 后，自动在 PR conversation 发一条 `issue_comment` 通知（摘要 + next actions）。
-2. **owner 决策动作**：Owner 发送 `/qzai apply-review`（`mode=apply|partial|reject`）。
+1. **通知触达（主方案）**：review-bot 完成 review 后，**必须（MUST）**自动在 PR conversation 发一条 `issue_comment` 通知（摘要 + next actions）。
+2. **owner 决策动作**：Owner 在收到通知并准备开始处理后发送 `/qzai apply-review`（`mode=apply|partial|reject`）。
 3. **重审触发（命令收敛）**：不新增 `/qzai re-review`，统一复用 `/qzai review`。
 
 ### 角色映射示例（新增）
