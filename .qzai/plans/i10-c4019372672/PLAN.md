@@ -65,7 +65,7 @@ mode: <required: apply|reject|partial>
 note: <optional>
 ```
 
-`apply-review` 的含义是“Owner 对本轮 review 给出处理决策”，并触发后续执行要求：
+`apply-review` 的含义是“Owner 对本轮 review 给出处理决策（承诺事件）”，使用时机为：收到 review-bot 自动通知后，由 Owner（或具备 write 权限者）发起。
 - `mode=apply|partial`：状态进入 `awaiting_owner_changes`；Owner 必须完成两件事后才进入 `applied`（或随后触发 rerun/followup）：
   1) 提交修复 commit；
   2) 在对应 review 线程回复处理结果（含 commit sha 或不采纳理由）。
@@ -94,11 +94,19 @@ reviewer 给出评论后，owner（PR 发起者）的回应路径固定为三步
 2. **owner 决策动作**：Owner 发送 `/qzai apply-review`（`mode=apply|partial|reject`）。
 3. **重审触发（命令收敛）**：不新增 `/qzai re-review`，统一复用 `/qzai review`。
 
+### 角色映射示例（新增）
+- Owner = PR author（负责修改者）。示例：`luxiaofeng`。
+- Reviewer = 执行 review 的 agent（可与 Owner 不同）。示例：`qzai`。
+- Master = 监督/裁决角色。示例：`qqchang2nd`。
+
+关键约束：Master 不作为主链路消息总线；主链路触达由 review-bot 自动通知完成。
+
 ### 通知机制（不依赖 @mention）
 
 主方案（A）：**自动 issue_comment 通知**（MUST）
 - 触发时机：review 进入 `reviewed` 后立即发送。
 - 发送者：对应 `agentId` 的 review-bot GitHub App 身份（MUST）。
+- 触达约束：不得依赖 Master 转发，也不要求 reviewer 另开 comment 触发通知（MUST）。
 - 通知内容 schema（MUST）：
   - `reviewId`
   - `prNumber`
