@@ -66,6 +66,7 @@ note: <optional>
 ```
 
 `apply-review` 的含义是“Owner 对本轮 review 给出处理决策（承诺事件）”，使用时机为：收到 review-bot 自动通知后、准备开始修改前，由 Owner（或具备 write 权限者）发起。
+- 在 Owner 无 write 权限（外部贡献者/fork PR）场景下，`apply-review` 仍可执行且仅记录承诺与状态，不直接触发敏感写操作。
 - `mode=apply|partial`：状态**必须**进入 `awaiting_owner_changes`；Owner 满足完成条件后进入 `applied`（随后可触发 rerun/followup）：
   1) 提交修复 commit（MUST）；
   2) 在对应 review 线程回复处理结果（MUST，含 commit sha 或不采纳理由）。
@@ -83,7 +84,10 @@ note: <optional>
 - `partial`：Owner 部分采纳，需在 `note` 写范围。
 
 ### 触发权限（apply-review）
-- 仅 Owner/MEMBER/COLLABORATOR 或 `permission>=write` 用户。
+- **方案选择：B（写死）**。
+- 允许 PR author（Owner）在无 write 权限时发送 `/qzai apply-review`，其语义仅为“承诺事件记录/状态流转”（不触发敏感写操作）。
+- 具备 `permission>=write` 的用户也可发送 `/qzai apply-review`（协作者代发/推进）。
+- 任何会触发敏感写操作的步骤（如自动推送代码、合并、标签写入）仍必须由 write 权限者或受信 App 执行。
 - review-bot 不应自发发送该命令（避免自触发闭环）。
 
 ## 2.3 reviewer -> owner 反馈闭环（更新）
@@ -262,4 +266,5 @@ review-id: rvw_29_d955d43_luxiaofeng_1
 6. 与现有 plan/impl/issue wrappers 的路由互斥规则明确。  
 7. reviewer 评论后的 owner 反馈闭环明确（自动通知 + apply-review 决策 + `/qzai review` 复跑）。  
 8. 明确不依赖 @mention：主通知为 review-bot 自动 issue_comment，check-run 为 fallback。  
-9. 全链路 App 身份要求与 fail-closed 门禁明确。
+9. 外部贡献者（Owner 无 write）可执行 `/qzai apply-review` 记录承诺，且不触发敏感写操作；敏感动作仍由 write 权限者/App 执行。  
+10. 全链路 App 身份要求与 fail-closed 门禁明确。
