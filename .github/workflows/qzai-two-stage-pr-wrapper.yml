@@ -2,7 +2,7 @@ name: QZAI Two-Stage PR Flow (This Repo)
 
 on:
   issue_comment:
-    types: [created]
+    types: [created, edited]
 
 permissions:
   contents: write
