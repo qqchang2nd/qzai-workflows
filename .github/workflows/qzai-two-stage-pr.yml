@@ -380,6 +380,8 @@ jobs:
               });
               core.setOutput('skipCreate', '1');
               core.setOutput('existingPrUrl', pr.html_url);
+              core.setOutput('planPrNumber', String(pr.number || ''));
+              core.setOutput('planSnapshotSha', String(pr.head?.sha || ''));
             }
 
             core.setOutput('planKey', planKey);
@@ -449,7 +451,7 @@ jobs:
             .qzai/plans/${{ steps.plan.outputs.planKey }}/snapshot.json
 
       - name: "PLAN: attestation check-run"
-        if: steps.cmd.outputs.mode == 'plan' && steps.plan.outputs.skipCreate != '1' && steps.cmd.outputs.skip != '1' && steps.self.outputs.skip != '1'
+        if: steps.cmd.outputs.mode == 'plan' && steps.cmd.outputs.skip != '1' && steps.self.outputs.skip != '1'
         uses: actions/github-script@v7
         env:
           PLAN_KEY: ${{ steps.plan.outputs.planKey }}
@@ -457,7 +459,7 @@ jobs:
           APP_SLUG: ${{ steps.auth.outputs.appSlug }}
           APP_ID: ${{ steps.auth.outputs.appId }}
           INSTALLATION_ID: ${{ steps.auth.outputs.installationId }}
-          PLAN_SNAPSHOT_SHA: ${{ steps.cpr-plan.outputs.pull-request-head-sha }}
+          PLAN_SNAPSHOT_SHA: ${{ steps.plan.outputs.planSnapshotSha || steps.cpr-plan.outputs.pull-request-head-sha }}
         with:
           github-token: ${{ steps.app-token.outputs.token }}
           script: |
@@ -494,11 +496,11 @@ jobs:
             });
 
       - name: "PLAN: persist planSnapshotSha to PR body"
-        if: steps.cmd.outputs.mode == 'plan' && steps.plan.outputs.skipCreate != '1' && steps.cmd.outputs.skip != '1' && steps.self.outputs.skip != '1'
+        if: steps.cmd.outputs.mode == 'plan' && steps.cmd.outputs.skip != '1' && steps.self.outputs.skip != '1'
         uses: actions/github-script@v7
         env:
-          PR_NUMBER: ${{ steps.cpr-plan.outputs.pull-request-number }}
-          PLAN_SNAPSHOT_SHA: ${{ steps.cpr-plan.outputs.pull-request-head-sha }}
+          PR_NUMBER: ${{ steps.plan.outputs.planPrNumber || steps.cpr-plan.outputs.pull-request-number }}
+          PLAN_SNAPSHOT_SHA: ${{ steps.plan.outputs.planSnapshotSha || steps.cpr-plan.outputs.pull-request-head-sha }}
         with:
           github-token: ${{ steps.app-token.outputs.token }}
           script: |
@@ -519,7 +521,7 @@ jobs:
         env:
           PLAN_KEY: ${{ steps.plan.outputs.planKey }}
           PR_URL: ${{ steps.cpr-plan.outputs.pull-request-url || steps.plan.outputs.existingPrUrl }}
-          PLAN_SNAPSHOT_SHA: ${{ steps.cpr-plan.outputs.pull-request-head-sha }}
+          PLAN_SNAPSHOT_SHA: ${{ steps.plan.outputs.planSnapshotSha || steps.cpr-plan.outputs.pull-request-head-sha }}
         with:
           github-token: ${{ steps.app-token.outputs.token }}
           script: |
