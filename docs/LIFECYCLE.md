@@ -59,6 +59,7 @@
 规则：
 - **必须开 Plan PR**：用 `/qzai plan-pr` 创建 Plan PR，把设计/方案落实到文档（Plan PR 即文档载体）。
 - Plan PR 的核心交付物：目标/范围/非目标/方案/风险/回滚/验收口径（DoD）。
+- `impl-pr` 为 fail-closed：Plan PR 分支必须包含 `.qzai/plans/<planKey>/PLAN.md`，且其中必须存在 `## DoD` 区块。
 
 原因：Feat 的不确定性更高，Plan PR 能把关键决策沉淀为可引用的审计证据，避免边做边改、口头决策丢失。
 
