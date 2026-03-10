@@ -547,6 +547,8 @@ jobs:
         env:
           AGENT_ID: ${{ steps.cmd.outputs.agentId }}
           PLAN_URL: ${{ steps.cmd.outputs.planUrl }}
+          APPS_JSON: ${{ steps.apps.outputs.appsJson }}
+          # Expected app identity for the *impl* agent (used for later steps), not for plan attestation.
           APP_SLUG: ${{ steps.auth.outputs.appSlug }}
           APP_ID: ${{ steps.auth.outputs.appId }}
           INSTALLATION_ID: ${{ steps.auth.outputs.installationId }}
@@ -612,15 +614,30 @@ jobs:
 
             // Must-fix: close the issuer loop.
             // A same-named check-run could be forged by other workflows/apps with checks:write.
-            // We must verify the creating App identity matches the expected GitHub App.
-            const expectSlug = String(process.env.APP_SLUG || '');
-            const expectAppIdNum = Number(process.env.APP_ID);
+            // We must verify the creating App identity matches the *plan agent* GitHub App (not the impl agent).
+            const apps = JSON.parse(String(process.env.APPS_JSON || '{}'));
+            if (apps.version !== 1 || !apps.agents || typeof apps.agents !== 'object') {
+              core.setFailed('Fail-closed: invalid APPS_JSON (expected v8 schema: {version:1, agents:{...}})');
+              return;
+            }
+            const planRec = apps.agents[planAgentId];
+            if (!planRec) {
+              core.setFailed(`Fail-closed: planAgentId not allowed (not found in .qzai/apps.json): ${planAgentId}`);
+              return;
+            }
+            const expectSlug = String(planRec.appSlug || '');
+            const expectAppIdNum = Number(planRec.appId);
+            const expectInstallationIdNum = Number(planRec.installationId);
             if (!expectSlug) {
-              core.setFailed('Fail-closed: missing expected APP_SLUG at runtime.');
+              core.setFailed(`Fail-closed: missing .qzai/apps.json agents.${planAgentId}.appSlug`);
               return;
             }
             if (!Number.isFinite(expectAppIdNum) || expectAppIdNum <= 0) {
-              core.setFailed('Fail-closed: invalid expected APP_ID at runtime (must be positive number).');
+              core.setFailed(`Fail-closed: invalid .qzai/apps.json agents.${planAgentId}.appId (must be positive number)`);
+              return;
+            }
+            if (!Number.isFinite(expectInstallationIdNum) || expectInstallationIdNum <= 0) {
+              core.setFailed(`Fail-closed: invalid .qzai/apps.json agents.${planAgentId}.installationId (must be positive number)`);
               return;
             }
 
@@ -638,10 +655,10 @@ jobs:
 
             const summary = att.output.summary;
             const expectId = String(expectAppIdNum);
-            const expectInstallationId = String(process.env.INSTALLATION_ID);
+            const expectInstallationId = String(expectInstallationIdNum);
             const expectPlanKey = planKey;
             const expectSha = planSnapshotSha;
-            const expectAgentId = agentId;
+            const expectAgentId = planAgentId;
 
             const requiredSnippets = [
               `planKey: \`${expectPlanKey}\``,
