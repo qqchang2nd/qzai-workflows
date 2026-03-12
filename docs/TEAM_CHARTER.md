@@ -63,6 +63,14 @@ source scripts/gh_app_auth.sh --agent <agentId>
   - 必须 `reset --hard origin/main` 后重新 `cherry-pick` 正确提交；或重开干净分支。
   - 禁止“先开 PR 再慢慢清理”，避免浪费 review 成本。
 
+### P0-7 Token/上下文卫生（防止 cacheRead 暴涨）
+当任务涉及长上下文或高频工具调用时，必须遵守：
+- **重活下沉**：长文/大网页/批量工具/代码实现一律用子 Agent/隔离会话执行，主会话只保留摘要 + 链接。
+- **超长会话熔断**：一旦发现当日 usage 里 `cacheRead` 异常偏大（例如 > 输入 token 的 2x，或出现百万级趋势），立刻 `/clear` 或切新会话；禁止继续在同一会话滚雪球。
+- **抓取限额**：网页/文档抓取必须设置字符上限（maxChars）与截图深度（depth），避免把 2MB+ 内容反复注入上下文。
+
+> 解释：今天的 80M+ token 暴涨主要来自 cacheRead（上下文重读），不是单个 cron。
+
 ---
 
 ## 任务模板（建议直接复制）
