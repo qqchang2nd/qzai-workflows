@@ -401,6 +401,12 @@ jobs:
           const fs = require('fs');
           const path = require('path');
           const planKey = process.env.PLAN_KEY;
+
+          // P0: validate planKey to prevent path traversal.
+          if (!/^[A-Za-z0-9._-]+$/.test(planKey || '')) {
+            console.error(`Fail-closed: invalid planKey (must match ^[A-Za-z0-9._-]+$): ${planKey}`);
+            process.exit(1);
+          }
           const issue = JSON.parse(process.env.ISSUE_JSON);
           const comment = JSON.parse(process.env.COMMENT_JSON);
           const meta = {
@@ -446,7 +452,17 @@ jobs:
           ].join('\n');
           fs.writeFileSync(path.join('.qzai','plans',planKey,'meta.json'), JSON.stringify(meta,null,2)+"\n");
           fs.writeFileSync(path.join('.qzai','plans',planKey,'snapshot.json'), JSON.stringify(snapshot,null,2)+"\n");
-          fs.writeFileSync(path.join('.qzai','plans',planKey,'PLAN.md'), planTemplate);
+
+          // P0: Never overwrite an existing non-empty PLAN.md (data loss risk).
+          const planMdPath = path.join('.qzai','plans',planKey,'PLAN.md');
+          if (fs.existsSync(planMdPath)) {
+            const existing = fs.readFileSync(planMdPath, 'utf8');
+            if (String(existing || '').trim().length > 0) {
+              console.error(`Fail-closed: PLAN.md already exists and is non-empty: ${planMdPath}. Refusing to overwrite.`);
+              process.exit(1);
+            }
+          }
+          fs.writeFileSync(planMdPath, planTemplate);
           NODE
 
       - name: "PLAN: create Plan PR (Meta + Snapshot)"
@@ -614,6 +630,11 @@ jobs:
               return;
             }
             const planKey = planKeyMatch[1].trim();
+            // P0: validate planKey to prevent path traversal.
+            if (!/^[A-Za-z0-9._-]+$/.test(planKey)) {
+              core.setFailed(`Fail-closed: invalid planKey (must match ^[A-Za-z0-9._-]+$): ${planKey}`);
+              return;
+            }
             const planAgentId = agentIdMatch[1].trim();
             const issueNumber = Number(refsMatch[1]);
             // Allow implAgentId to differ from planAgentId, as long as both are valid and allowed.
@@ -654,7 +675,8 @@ jobs:
             }
 
             const lines = planMd.split(/\r?\n/);
-            const dodStart = lines.findIndex(line => /^##\s+DoD\s*$/i.test(line));
+            // P1: allow DoD heading variants like "## DoD ✅" by matching word boundary.
+            const dodStart = lines.findIndex(line => /^##\s+DoD\b/i.test(line));
             if (dodStart < 0) {
               core.setFailed(`Fail-closed: ${planMdPath} lacks required '## DoD' section.`);
               return;
