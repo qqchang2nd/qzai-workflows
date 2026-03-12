@@ -1,8 +1,12 @@
-name: QZAI PR Slash Review Flow (This Repo)
+name: QZAI PR Slash Review Flow (This Repo) [DEPRECATED]
+
+# NOTE:
+# - 主入口已统一收敛到 qzai-pr-review-wrapper.yml -> reusable qzai-pr-review.yml
+# - 为避免 /qzai review 出现“双触发/重复触发”（两个 workflow 同时监听 issue_comment），此文件不再监听 issue_comment。
+# - 如需调试可手动 workflow_dispatch。
 
 on:
-  issue_comment:
-    types: [created, edited]
+  workflow_dispatch:
 
 permissions:
   contents: read
