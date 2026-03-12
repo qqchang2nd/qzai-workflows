@@ -8,7 +8,9 @@
 ## P0：六条硬规则（Fail-closed）
 
 ### P0-1 身份门禁（GitHub 写操作必须用 GitHub App）
-**任何 GitHub 写操作**（push / commit / PR / issue_comment / review / label / close / merge）必须先切到对应 Agent 的 GitHub App 身份：
+**任何 GitHub 写操作**（push / commit / PR / issue_comment / review / label / close / merge）必须先切到对应 Agent 的 GitHub App 身份。
+
+> 这里的 *review* 也包含：提交 Review、Request changes、Approve（不允许用 `qqchang2nd` 人类账号在 PR 上留下 Review）。
 
 ```bash
 source scripts/gh_app_auth.sh --agent <agentId>
