@@ -48,7 +48,16 @@ source scripts/gh_app_auth.sh --agent <agentId>
 - 无证据型交付（P0-2）
 
 ### P0-6 PR 边界卫生（一个 PR 只做一件事，禁止串单）
-**任何 PR 在创建/更新前必须自检**，确保不会混入其他分支/其他任务的提交：
+**团队强制规范：每个 PR 必须使用独立 git worktree（防线3）**，禁止在“当前工作目录/当前分支”上直接切新分支开 PR。
+
+标准做法：
+```bash
+git fetch origin
+scripts/pr_worktree_new.sh --branch <branch>
+cd ../worktrees/<branch>   # 实际目录会把 / 替换为 -
+```
+
+自检（仍必须做）：
 
 - 分支必须从 `origin/main` 新建（或至少保证 merge-base = `origin/main`）：
   ```bash
