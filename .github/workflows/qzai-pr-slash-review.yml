@@ -15,7 +15,7 @@ permissions:
   checks: write
 
 concurrency:
-  group: qzai-pr-review-${{ github.repository }}-${{ github.event.comment.id || github.run_id }}
+  group: qzai-pr-review-${{ github.repository }}-${{ github.run_id }}
   cancel-in-progress: false
 
 jobs:
