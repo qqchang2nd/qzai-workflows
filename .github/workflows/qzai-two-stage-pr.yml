@@ -401,6 +401,12 @@ jobs:
           const fs = require('fs');
           const path = require('path');
           const planKey = process.env.PLAN_KEY;
+
+          // P0: validate planKey to prevent path traversal.
+          if (!/^[A-Za-z0-9._-]+$/.test(planKey || '')) {
+            console.error(`Fail-closed: invalid planKey (must match ^[A-Za-z0-9._-]+$): ${planKey}`);
+            process.exit(1);
+          }
           const issue = JSON.parse(process.env.ISSUE_JSON);
           const comment = JSON.parse(process.env.COMMENT_JSON);
           const meta = {
@@ -419,8 +425,44 @@ jobs:
             },
             snapshotAt: new Date().toISOString(),
           };
+          const planTemplate = [
+            '# PLAN',
+            '',
+            '## Context',
+            '- 背景：',
+            '- 目标：',
+            '',
+            '## Scope',
+            '- In Scope:',
+            '- Out of Scope:',
+            '',
+            '## Approach',
+            '- 方案：',
+            '- 风险与回滚：',
+            '',
+            '## DoD',
+            '- [ ] 补充可验证的完成项 1',
+            '- [ ] 补充可验证的完成项 2',
+            '- [ ] 补充可验证的完成项 3',
+            '',
+            '## Validation',
+            '- 测试：',
+            '- 验收方式：',
+            ''
+          ].join('\n');
           fs.writeFileSync(path.join('.qzai','plans',planKey,'meta.json'), JSON.stringify(meta,null,2)+"\n");
           fs.writeFileSync(path.join('.qzai','plans',planKey,'snapshot.json'), JSON.stringify(snapshot,null,2)+"\n");
+
+          // P0: Never overwrite an existing non-empty PLAN.md (data loss risk).
+          const planMdPath = path.join('.qzai','plans',planKey,'PLAN.md');
+          if (fs.existsSync(planMdPath)) {
+            const existing = fs.readFileSync(planMdPath, 'utf8');
+            if (String(existing || '').trim().length > 0) {
+              console.error(`Fail-closed: PLAN.md already exists and is non-empty: ${planMdPath}. Refusing to overwrite.`);
+              process.exit(1);
+            }
+          }
+          fs.writeFileSync(planMdPath, planTemplate);
           NODE
 
       - name: "PLAN: create Plan PR (Meta + Snapshot)"
@@ -449,6 +491,7 @@ jobs:
           add-paths: |
             .qzai/plans/${{ steps.plan.outputs.planKey }}/meta.json
             .qzai/plans/${{ steps.plan.outputs.planKey }}/snapshot.json
+            .qzai/plans/${{ steps.plan.outputs.planKey }}/PLAN.md
 
       - name: "PLAN: attestation check-run"
         if: steps.cmd.outputs.mode == 'plan' && steps.cmd.outputs.skip != '1' && steps.self.outputs.skip != '1'
@@ -589,6 +632,11 @@ jobs:
               return;
             }
             const planKey = planKeyMatch[1].trim();
+            // P0: validate planKey to prevent path traversal.
+            if (!/^[A-Za-z0-9._-]+$/.test(planKey)) {
+              core.setFailed(`Fail-closed: invalid planKey (must match ^[A-Za-z0-9._-]+$): ${planKey}`);
+              return;
+            }
             const planAgentId = agentIdMatch[1].trim();
             const issueNumber = Number(refsMatch[1]);
             // Allow implAgentId to differ from planAgentId, as long as both are valid and allowed.
@@ -604,6 +652,51 @@ jobs:
               core.setFailed('Fail-closed: cannot determine planSnapshotSha (plan PR head sha missing and body has no planSnapshotSha).');
               return;
             }
+
+            const planMdPath = `.qzai/plans/${planKey}/PLAN.md`;
+            let planMd = '';
+            try {
+              const planContent = await github.rest.repos.getContent({
+                owner,
+                repo,
+                path: planMdPath,
+                ref: planSnapshotSha,
+              });
+              if (Array.isArray(planContent.data) || planContent.data.type !== 'file' || !planContent.data.content) {
+                core.setFailed(`Fail-closed: ${planMdPath} is missing or not a regular file in plan PR branch.`);
+                return;
+              }
+              planMd = Buffer.from(planContent.data.content, 'base64').toString('utf8');
+            } catch (e) {
+              if (e.status === 404) {
+                core.setFailed(`Fail-closed: required plan file not found in plan PR branch: ${planMdPath}`);
+                return;
+              }
+              core.setFailed(`Fail-closed: cannot read required plan file ${planMdPath}: ${e.message}`);
+              return;
+            }
+
+            const lines = planMd.split(/\r?\n/);
+            // P1: allow DoD heading variants like "## DoD ✅" by matching word boundary.
+            const dodStart = lines.findIndex(line => /^##\s+DoD\b/i.test(line));
+            if (dodStart < 0) {
+              core.setFailed(`Fail-closed: ${planMdPath} lacks required '## DoD' section.`);
+              return;
+            }
+            let dodEnd = lines.length;
+            for (let i = dodStart + 1; i < lines.length; i++) {
+              if (/^##\s+/.test(lines[i])) {
+                dodEnd = i;
+                break;
+              }
+            }
+            const dodSection = lines.slice(dodStart, dodEnd).join('\n').trimEnd();
+            const checklistLines = lines
+              .slice(dodStart + 1, dodEnd)
+              .filter(line => /^\s*[-*]\s+\[[ xX]\]\s+/.test(line));
+            const dodChecklist = checklistLines.length > 0
+              ? checklistLines.join('\n')
+              : '_No markdown checklist items found under `## DoD` in PLAN.md._';
 
             const checks = await github.rest.checks.listForRef({ owner, repo, ref: planSnapshotSha, per_page: 100 });
             const att = (checks.data.check_runs || []).find(c => c.name === 'qzai/plan-attestation');
@@ -704,8 +797,10 @@ jobs:
             core.setOutput('implAgentId', agentId);
             core.setOutput('branch', branch);
             core.setOutput('implKey', implKey);
+            core.setOutput('planDodChecklist', dodChecklist);
+            core.setOutput('planDodSectionB64', Buffer.from(dodSection, 'utf8').toString('base64'));
 
-      - name: "IMPL: write meta file"
+      - name: "IMPL: write meta + plan excerpt files"
         if: steps.cmd.outputs.mode == 'impl' && steps.impl.outputs.skipCreate != '1' && steps.cmd.outputs.skip != '1' && steps.self.outputs.skip != '1'
         shell: bash
         env:
@@ -714,6 +809,7 @@ jobs:
           PLAN_SNAPSHOT_SHA: ${{ steps.impl.outputs.planSnapshotSha }}
           ISSUE_NUMBER: ${{ steps.impl.outputs.issueNumber }}
           PLAN_URL: ${{ steps.cmd.outputs.planUrl }}
+          PLAN_DOD_SECTION_B64: ${{ steps.impl.outputs.planDodSectionB64 }}
         run: |
           set -euo pipefail
           mkdir -p ".qzai/impls/$IMPL_KEY"
@@ -728,7 +824,18 @@ jobs:
             planUrl: process.env.PLAN_URL,
             createdAt: new Date().toISOString(),
           };
+          const dodSection = Buffer.from(process.env.PLAN_DOD_SECTION_B64 || '', 'base64').toString('utf8');
+          const excerpt = [
+            '# Plan Excerpt',
+            '',
+            `- Plan URL: ${process.env.PLAN_URL}`,
+            `- planSnapshotSha: \`${process.env.PLAN_SNAPSHOT_SHA}\``,
+            '',
+            dodSection || '## DoD\n- [ ] Missing DoD excerpt',
+            ''
+          ].join('\n');
           fs.writeFileSync(path.join('.qzai','impls',process.env.IMPL_KEY,'meta.json'), JSON.stringify(meta,null,2)+"\n");
+          fs.writeFileSync(path.join('.qzai','impls',process.env.IMPL_KEY,'plan_excerpt.md'), excerpt);
           NODE
 
       - name: "IMPL: create Impl PR"
@@ -756,10 +863,14 @@ jobs:
             - requestedBy: @${{ github.actor }}
             - sourceComment: ${{ github.event.comment.html_url }}
 
+            ### Plan DoD Checklist
+            ${{ steps.impl.outputs.planDodChecklist }}
+
           labels: |
             qzai:impl
           add-paths: |
             .qzai/impls/${{ steps.impl.outputs.implKey }}/meta.json
+            .qzai/impls/${{ steps.impl.outputs.implKey }}/plan_excerpt.md
 
       - name: "IMPL: comment back result"
         if: steps.cmd.outputs.mode == 'impl' && steps.cmd.outputs.skip != '1' && steps.self.outputs.skip != '1'

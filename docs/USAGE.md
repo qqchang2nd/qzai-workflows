@@ -84,5 +84,6 @@ jobs:
     - `agentId: <agentId>`
     - `plan: <Plan PR URL>`
   - 作用：校验 plan attestation（fail-closed）后创建 Impl PR
+  - 额外约束（fail-closed）：Plan PR 分支必须存在 `.qzai/plans/<planKey>/PLAN.md`，且文件内必须包含 `## DoD` 区块。
 
 注意：为了避免与旧入口重复触发，本仓库的 wrapper 已对 `plan-pr/impl-pr` 做了互斥 guard。
