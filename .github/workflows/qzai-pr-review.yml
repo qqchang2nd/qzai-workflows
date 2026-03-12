@@ -1,0 +1,496 @@
+name: QZAI PR Review Flow (Reusable)
+
+on:
+  workflow_call:
+    secrets:
+      # Multi-agent secrets routing (required per agentId).
+      QZAI_AFEI_APP_ID: { required: false }
+      QZAI_AFEI_APP_PRIVATE_KEY: { required: false }
+      QZAI_AJI_APP_ID: { required: false }
+      QZAI_AJI_APP_PRIVATE_KEY: { required: false }
+      QZAI_JINGWUMING_APP_ID: { required: false }
+      QZAI_JINGWUMING_APP_PRIVATE_KEY: { required: false }
+      QZAI_LENGYAN_APP_ID: { required: false }
+      QZAI_LENGYAN_APP_PRIVATE_KEY: { required: false }
+      QZAI_LIXUNHUAN_APP_ID: { required: false }
+      QZAI_LIXUNHUAN_APP_PRIVATE_KEY: { required: false }
+      QZAI_LUXIAOFENG_APP_ID: { required: false }
+      QZAI_LUXIAOFENG_APP_PRIVATE_KEY: { required: false }
+      QZAI_MAIN_APP_ID: { required: false }
+      QZAI_MAIN_APP_PRIVATE_KEY: { required: false }
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  checks: write
+
+concurrency:
+  group: qzai-pr-review-${{ github.repository }}-${{ github.event.comment.id || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  qzai-pr-review:
+    if: github.event_name == 'issue_comment'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read apps mapping
+        id: apps
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const p = path.join(process.env.GITHUB_WORKSPACE, '.qzai/apps.json');
+            const raw = fs.readFileSync(p, 'utf8');
+            core.setOutput('appsJson', raw);
+
+      - name: Parse command (normalized first line)
+        id: cmd
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = String(context.payload.comment?.body || '');
+            const firstLine = body.split(/\r?\n/)[0] || '';
+
+            // Normalize:
+            // - take first line
+            // - trim
+            // - collapse all whitespace runs into a single space
+            const normalized = firstLine.trim().replace(/\s+/g, ' ');
+
+            const isReview = normalized === '/qzai review';
+            const isApply = normalized === '/qzai apply-review';
+            if (!isReview && !isApply) {
+              core.info('Skip: first line is not a normalized /qzai review or /qzai apply-review');
+              core.setOutput('skip', '1');
+              return;
+            }
+
+            const kv = {};
+            for (const line of body.split(/\r?\n/).slice(1)) {
+              const m = line.match(/^\s*([A-Za-z0-9_\-]+)\s*:\s*(.+?)\s*$/);
+              if (!m) continue;
+              kv[m[1]] = m[2];
+            }
+
+            if (!kv.agentId) {
+              core.setFailed('Missing required field: agentId');
+              return;
+            }
+
+            if (isApply) {
+              if (!kv['review-id']) {
+                core.setFailed('Missing required field for /qzai apply-review: review-id');
+                return;
+              }
+              if (!kv.mode) {
+                core.setFailed('Missing required field for /qzai apply-review: mode');
+                return;
+              }
+              const mode = String(kv.mode).trim().toLowerCase();
+              if (!['apply','reject','partial'].includes(mode)) {
+                core.setFailed('Invalid mode for /qzai apply-review (must be apply|reject|partial)');
+                return;
+              }
+              core.setOutput('reviewId', String(kv['review-id']).trim());
+              core.setOutput('mode', mode);
+              core.setOutput('note', String(kv.note || '').trim());
+            } else {
+              core.setOutput('scope', String(kv.scope || 'diff').trim());
+              core.setOutput('focus', String(kv.focus || '').trim());
+              core.setOutput('mode', String(kv.mode || 'initial').trim());
+              core.setOutput('reviewId', String(kv['review-id'] || '').trim());
+            }
+
+            core.setOutput('action', isReview ? 'review' : 'apply');
+            core.setOutput('agentId', String(kv.agentId).trim());
+
+      - name: Select agent GitHub App secrets (fail-closed)
+        if: steps.cmd.outputs.skip != '1'
+        id: sel
+        shell: bash
+        env:
+          AGENT_ID: ${{ steps.cmd.outputs.agentId }}
+          QZAI_AFEI_APP_ID: ${{ secrets.QZAI_AFEI_APP_ID }}
+          QZAI_AFEI_APP_PRIVATE_KEY: ${{ secrets.QZAI_AFEI_APP_PRIVATE_KEY }}
+          QZAI_AJI_APP_ID: ${{ secrets.QZAI_AJI_APP_ID }}
+          QZAI_AJI_APP_PRIVATE_KEY: ${{ secrets.QZAI_AJI_APP_PRIVATE_KEY }}
+          QZAI_JINGWUMING_APP_ID: ${{ secrets.QZAI_JINGWUMING_APP_ID }}
+          QZAI_JINGWUMING_APP_PRIVATE_KEY: ${{ secrets.QZAI_JINGWUMING_APP_PRIVATE_KEY }}
+          QZAI_LENGYAN_APP_ID: ${{ secrets.QZAI_LENGYAN_APP_ID }}
+          QZAI_LENGYAN_APP_PRIVATE_KEY: ${{ secrets.QZAI_LENGYAN_APP_PRIVATE_KEY }}
+          QZAI_LIXUNHUAN_APP_ID: ${{ secrets.QZAI_LIXUNHUAN_APP_ID }}
+          QZAI_LIXUNHUAN_APP_PRIVATE_KEY: ${{ secrets.QZAI_LIXUNHUAN_APP_PRIVATE_KEY }}
+          QZAI_LUXIAOFENG_APP_ID: ${{ secrets.QZAI_LUXIAOFENG_APP_ID }}
+          QZAI_LUXIAOFENG_APP_PRIVATE_KEY: ${{ secrets.QZAI_LUXIAOFENG_APP_PRIVATE_KEY }}
+          QZAI_MAIN_APP_ID: ${{ secrets.QZAI_MAIN_APP_ID }}
+          QZAI_MAIN_APP_PRIVATE_KEY: ${{ secrets.QZAI_MAIN_APP_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          agent="$AGENT_ID"
+          app_id=""
+          key=""
+          case "$agent" in
+            afei) app_id="$QZAI_AFEI_APP_ID"; key="$QZAI_AFEI_APP_PRIVATE_KEY";;
+            aji) app_id="$QZAI_AJI_APP_ID"; key="$QZAI_AJI_APP_PRIVATE_KEY";;
+            jingwuming) app_id="$QZAI_JINGWUMING_APP_ID"; key="$QZAI_JINGWUMING_APP_PRIVATE_KEY";;
+            lengyan) app_id="$QZAI_LENGYAN_APP_ID"; key="$QZAI_LENGYAN_APP_PRIVATE_KEY";;
+            lixunhuan) app_id="$QZAI_LIXUNHUAN_APP_ID"; key="$QZAI_LIXUNHUAN_APP_PRIVATE_KEY";;
+            luxiaofeng) app_id="$QZAI_LUXIAOFENG_APP_ID"; key="$QZAI_LUXIAOFENG_APP_PRIVATE_KEY";;
+            main) app_id="$QZAI_MAIN_APP_ID"; key="$QZAI_MAIN_APP_PRIVATE_KEY";;
+            *) echo "::error::Fail-closed: unsupported agentId '$agent'"; exit 1;;
+          esac
+          if [[ -z "$app_id" || -z "$key" ]]; then
+            echo "::error::Fail-closed: missing secrets for agentId=$agent. Please set the corresponding QZAI_<AGENT>_APP_ID and QZAI_<AGENT>_APP_PRIVATE_KEY secrets."
+            exit 1
+          fi
+          echo "app_id=$app_id" >> "$GITHUB_OUTPUT"
+          {
+            echo "APP_PRIVATE_KEY<<EOF"
+            echo "$key"
+            echo "EOF"
+          } >> "$GITHUB_ENV"
+
+      - name: Get installation id for repo (App JWT)
+        if: steps.cmd.outputs.skip != '1'
+        id: inst
+        uses: actions/github-script@v7
+        env:
+          QZAI_APP_ID: ${{ steps.sel.outputs.app_id }}
+          APP_PRIVATE_KEY: ${{ env.APP_PRIVATE_KEY }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const crypto = require('crypto');
+            const appIdStr = String(process.env.QZAI_APP_ID || '');
+            const privateKey = String(process.env.APP_PRIVATE_KEY || '');
+            if (!privateKey) {
+              core.setFailed('Fail-closed: missing APP_PRIVATE_KEY');
+              return;
+            }
+
+            const now = Math.floor(Date.now() / 1000);
+            const header = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString('base64url');
+            const payload = Buffer.from(JSON.stringify({ iat: now, exp: now + 600, iss: Number(appIdStr) })).toString('base64url');
+            const toSign = `${header}.${payload}`;
+            const sig = crypto.createSign('RSA-SHA256').update(toSign).sign(privateKey).toString('base64url');
+            const jwt = `${toSign}.${sig}`;
+
+            const url = `https://api.github.com/repos/${context.repo.owner}/${context.repo.repo}/installation`;
+            const resp = await fetch(url, {
+              method: 'GET',
+              headers: {
+                'Authorization': `Bearer ${jwt}`,
+                'Accept': 'application/vnd.github+json',
+                'X-GitHub-Api-Version': '2022-11-28',
+              },
+            });
+            if (!resp.ok) {
+              const body = await resp.text();
+              core.setFailed(`Fail-closed: failed to get repo installation: HTTP ${resp.status} ${body}`);
+              return;
+            }
+            const data = await resp.json();
+            core.setOutput('installation_id', String(Number(data.id || 0)));
+
+      - name: Create GitHub App installation token
+        if: steps.cmd.outputs.skip != '1'
+        id: app-token
+        uses: tibdex/github-app-token@v2
+        with:
+          app_id: ${{ steps.sel.outputs.app_id }}
+          private_key: ${{ env.APP_PRIVATE_KEY }}
+
+      - name: Resolve app + fail-closed authz
+        if: steps.cmd.outputs.skip != '1'
+        id: auth
+        uses: actions/github-script@v7
+        env:
+          APPS_JSON: ${{ steps.apps.outputs.appsJson }}
+          AGENT_ID: ${{ steps.cmd.outputs.agentId }}
+          QZAI_APP_ID: ${{ steps.sel.outputs.app_id }}
+          APP_PRIVATE_KEY: ${{ env.APP_PRIVATE_KEY }}
+          INSTALLATION_ID: ${{ steps.inst.outputs.installation_id }}
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const apps = JSON.parse(process.env.APPS_JSON);
+            const agentId = String(process.env.AGENT_ID || '');
+
+            if (apps.version !== 1 || !apps.agents || typeof apps.agents !== 'object') {
+              core.setFailed('Fail-closed: .qzai/apps.json must be v8 schema: { version: 1, agents: { ... } }');
+              return;
+            }
+
+            const rec = apps.agents[agentId];
+            if (!rec) {
+              core.setFailed(`Fail-closed: agentId not allowed (not found in .qzai/apps.json agents map): ${agentId}`);
+              return;
+            }
+
+            const expectedSlug = String(rec.appSlug || '');
+            const expectedAppId = Number(rec.appId);
+            const expectedInstallationId = Number(rec.installationId);
+            if (!expectedSlug) {
+              core.setFailed(`Fail-closed: missing required field .qzai/apps.json agents.${agentId}.appSlug`);
+              return;
+            }
+            if (!Number.isFinite(expectedAppId) || expectedAppId <= 0) {
+              core.setFailed(`Fail-closed: invalid .qzai/apps.json agents.${agentId}.appId (must be positive number)`);
+              return;
+            }
+            if (!Number.isFinite(expectedInstallationId) || expectedInstallationId <= 0) {
+              core.setFailed(`Fail-closed: invalid .qzai/apps.json agents.${agentId}.installationId (must be positive number)`);
+              return;
+            }
+
+            // Fetch app identity using an App JWT.
+            const crypto = require('crypto');
+            const appIdStr = String(process.env.QZAI_APP_ID || '');
+            const privateKey = String(process.env.APP_PRIVATE_KEY || '');
+            const now = Math.floor(Date.now() / 1000);
+            const header = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString('base64url');
+            const payload = Buffer.from(JSON.stringify({ iat: now, exp: now + 600, iss: Number(appIdStr) })).toString('base64url');
+            const toSign = `${header}.${payload}`;
+            const sig = crypto.createSign('RSA-SHA256').update(toSign).sign(privateKey).toString('base64url');
+            const jwt = `${toSign}.${sig}`;
+
+            const resp = await fetch('https://api.github.com/app', {
+              method: 'GET',
+              headers: {
+                'Authorization': `Bearer ${jwt}`,
+                'Accept': 'application/vnd.github+json',
+                'X-GitHub-Api-Version': '2022-11-28',
+              },
+            });
+            if (!resp.ok) {
+              const body = await resp.text();
+              core.setFailed(`Fail-closed: GET /app via App JWT failed: HTTP ${resp.status} ${body}`);
+              return;
+            }
+            const appData = await resp.json();
+
+            const actualSlug = String(appData.slug || '');
+            const actualAppId = Number(appData.id);
+            const actualInstallationId = Number(process.env.INSTALLATION_ID);
+
+            if (expectedSlug !== actualSlug) {
+              core.setFailed(`Fail-closed: appSlug mismatch for agentId=${agentId}. expected=${expectedSlug} actual=${actualSlug}`);
+              return;
+            }
+            if (expectedAppId !== actualAppId) {
+              core.setFailed(`Fail-closed: appId mismatch for agentId=${agentId}. expected=${expectedAppId} actual=${actualAppId}`);
+              return;
+            }
+            if (expectedInstallationId !== actualInstallationId) {
+              core.setFailed(`Fail-closed: installationId mismatch for agentId=${agentId}. expected=${expectedInstallationId} actual=${actualInstallationId}`);
+              return;
+            }
+
+            core.setOutput('appSlug', actualSlug);
+            core.setOutput('appId', String(actualAppId));
+            core.setOutput('installationId', String(actualInstallationId));
+
+      - name: Ignore bot self-comment
+        if: steps.cmd.outputs.skip != '1'
+        id: self
+        uses: actions/github-script@v7
+        env:
+          APP_SLUG: ${{ steps.auth.outputs.appSlug }}
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const actor = String(context.payload.sender?.login || '').toLowerCase();
+            const slug = String(process.env.APP_SLUG || '').toLowerCase();
+
+            if (!actor || !slug) return;
+            if (actor === slug || actor === `${slug}[bot]`) {
+              core.info(`Skip: ignore bot self comment to prevent loops: ${actor}`);
+              core.setOutput('skip', '1');
+            }
+
+      - name: Execute review/apply-review
+        if: steps.cmd.outputs.skip != '1' && steps.self.outputs.skip != '1'
+        uses: actions/github-script@v7
+        env:
+          ACTION: ${{ steps.cmd.outputs.action }}
+          AGENT_ID: ${{ steps.cmd.outputs.agentId }}
+          SCOPE: ${{ steps.cmd.outputs.scope }}
+          FOCUS: ${{ steps.cmd.outputs.focus }}
+          MODE: ${{ steps.cmd.outputs.mode }}
+          REVIEW_ID: ${{ steps.cmd.outputs.reviewId }}
+          NOTE: ${{ steps.cmd.outputs.note }}
+          APP_SLUG: ${{ steps.auth.outputs.appSlug }}
+          APP_ID: ${{ steps.auth.outputs.appId }}
+          INSTALLATION_ID: ${{ steps.auth.outputs.installationId }}
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const crypto = require('crypto');
+
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issue = context.payload.issue;
+
+            if (!issue.pull_request) {
+              core.setFailed('Fail-closed: /qzai review and /qzai apply-review must be triggered from a PR conversation (issue_comment on PR).');
+              return;
+            }
+
+            const prNumber = issue.number;
+            const actor = String(context.payload.sender?.login || '');
+
+            const agentId = String(process.env.AGENT_ID || '');
+            const action = String(process.env.ACTION || '');
+            const appSlug = String(process.env.APP_SLUG || '');
+            const appId = String(process.env.APP_ID || '');
+            const installationId = String(process.env.INSTALLATION_ID || '');
+
+            const pr = await github.rest.pulls.get({ owner, repo, pull_number: prNumber });
+            const headSha = String(pr.data.head?.sha || '');
+
+            if (!headSha) {
+              core.setFailed('Fail-closed: missing PR head sha');
+              return;
+            }
+
+            const safeComment = async (body) => {
+              await github.rest.issues.createComment({ owner, repo, issue_number: prNumber, body });
+            };
+
+            const createAttestation = async ({ reviewId, decision, status }) => {
+              const summary = [
+                `- reviewId: \`${reviewId}\``,
+                `- agentId: \`${agentId}\``,
+                `- appSlug: \`${appSlug}\``,
+                `- appId: \`${appId}\``,
+                `- installationId: \`${installationId}\``,
+                `- prNumber: \`${prNumber}\``,
+                `- headSha: \`${headSha}\``,
+                `- decision: \`${decision}\``,
+                `- status: \`${status}\``
+              ].join('\n');
+
+              await github.rest.checks.create({
+                owner,
+                repo,
+                name: 'qzai/review-attestation',
+                head_sha: headSha,
+                status: 'completed',
+                conclusion: status === 'completed' ? 'success' : 'failure',
+                output: { title: 'QZAI Review Attestation', summary }
+              });
+            };
+
+            if (action === 'review') {
+              // idempotency key: <repo>#<pr>#<headSha>#<agentId>
+              const reviewKey = `${owner}/${repo}#${prNumber}#${headSha}#${agentId}`;
+              const existing = await github.rest.issues.listComments({ owner, repo, issue_number: prNumber, per_page: 100 });
+              const exists = (existing.data || []).find(c => String(c.body || '').includes(`reviewKey: \`${reviewKey}\``));
+
+              if (exists) {
+                await safeComment([
+                  '### QZAI review (idempotent)',
+                  `已有 review 记录（复用）：${exists.html_url}`,
+                  '',
+                  `- reviewKey: \`${reviewKey}\``,
+                  `- agentId: \`${agentId}\``,
+                  `- headSha: \`${headSha}\``
+                ].join('\n'));
+                return;
+              }
+
+              const shortSha = headSha.slice(0, 7);
+              const seq = 1;
+              const reviewId = `rvw_${prNumber}_${shortSha}_${agentId}_${seq}`;
+
+              await createAttestation({ reviewId, decision: 'comment', status: 'completed' });
+
+              const nextAction = [
+                '/qzai apply-review',
+                `agentId: ${agentId}`,
+                `review-id: ${reviewId}`,
+                'mode: apply',
+              ].join('\n');
+
+              await safeComment([
+                '### ✅ QZAI review',
+                '',
+                `- reviewId: \`${reviewId}\``,
+                `- reviewKey: \`${reviewKey}\``,
+                `- agentId: \`${agentId}\``,
+                `- prNumber: \`${prNumber}\``,
+                `- headSha: \`${headSha}\``,
+                '',
+                '**Next action (Owner):**',
+                '```text',
+                nextAction,
+                '```',
+                '',
+                '_MVP: attestation + apply-review state recording. Review text generation is out of scope in this repo._'
+              ].join('\n'));
+
+              return;
+            }
+
+            if (action === 'apply') {
+              const reviewId = String(process.env.REVIEW_ID || '').trim();
+              const mode = String(process.env.MODE || '').trim();
+              const note = String(process.env.NOTE || '').trim();
+
+              const prAuthor = String(pr.data.user?.login || '');
+
+              // Permission model (Plan option B): allow PR author even without write; allow collaborators with write+.
+              let permitted = false;
+              if (actor && prAuthor && actor.toLowerCase() === prAuthor.toLowerCase()) {
+                permitted = true;
+              } else {
+                try {
+                  const perm = await github.rest.repos.getCollaboratorPermissionLevel({ owner, repo, username: actor });
+                  const level = String(perm.data.permission || '');
+                  if (['admin','maintain','write'].includes(level)) permitted = true;
+                } catch (e) {
+                  // Fail-closed on API errors
+                  permitted = false;
+                }
+              }
+
+              if (!permitted) {
+                core.setFailed('Fail-closed: PERMISSION_DENIED (must be PR author or have write permission)');
+                return;
+              }
+
+              const decisionKey = `${reviewId}#${mode}`;
+              const existing = await github.rest.issues.listComments({ owner, repo, issue_number: prNumber, per_page: 100 });
+              const already = (existing.data || []).find(c => String(c.body || '').includes(`decisionKey: \`${decisionKey}\``));
+              if (already) {
+                await safeComment([
+                  '### QZAI apply-review (idempotent)',
+                  `已处理同一 decisionKey，复用：${already.html_url}`,
+                  '',
+                  `- decisionKey: \`${decisionKey}\``
+                ].join('\n'));
+                return;
+              }
+
+              await safeComment([
+                '### ✅ QZAI apply-review',
+                '',
+                `- reviewId: \`${reviewId}\``,
+                `- decisionKey: \`${decisionKey}\``,
+                `- mode: \`${mode}\``,
+                note ? `- note: ${note}` : null,
+                `- requestedBy: @${actor}`,
+                `- owner(prAuthor): @${prAuthor}`,
+                `- headSha: \`${headSha}\``
+              ].filter(Boolean).join('\n'));
+
+              await createAttestation({ reviewId, decision: mode, status: 'completed' });
+              return;
+            }
+
+            core.setFailed(`Fail-closed: unknown action ${action}`);
