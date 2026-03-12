@@ -1,0 +1,10 @@
+{
+  "planKey": "i46-c4048069505",
+  "issue": {
+    "number": 46,
+    "title": "feat: /qzai followup (wakeup + evidence-based closure)",
+    "body": "## 背景/动机\n我们需要一个 **显式唤醒 + 必须回执** 的命令，解决：不依赖 @mention、不靠人肉盯评论、派单后必须有证据闭环。\n\n## 目标\n新增 slash 命令：`/qzai followup`\n- 用于：对某个 Issue/PR/任务线程进行“催办/回执/验收”的统一入口\n- 输出必须中文、真实换行（严禁字面量 \\n）\n\n## 设计草案（v1）\n### 触发\n- 事件：`issue_comment`（created）\n- 命令行：仅解析评论第一行\n- 精确匹配：`/qzai followup`\n\n### 输入字段（从 comment body 解析，key: value 形式，可选）\n- `target:` 目标（例如 issue#30 / pr#40 / URL）\n- `goal:` 本次 followup 的目的\n- `owners:` 责任 agentId 列表（例如 luxiaofeng/lengyan）\n- `eta:` 期望完成时间\n- `checks:` 验收检查点列表（证据型）\n\n### 输出（必须）\n- 结构化回执：\n  - 目标/目的\n  - 当前状态（unknown|in-progress|blocked|done）\n  - 下一步（可执行）\n  - 证据要求（链接/SHA/check-run）\n  - ETA\n\n### Fail-closed 规则\n- 必须 GitHub App 身份执行写操作（P0-1）\n- 输出必须真实换行\n- 必须包含“证据要求”区块（P0-2）\n\n## 验收/DoD\n1) 有 workflow + parser + 执行逻辑（PR 交付）\n2) 触发一条 `/qzai followup` 评论会产生一条回执评论（无重复、无 \\n 字面量）\n3) 能与两段式流程联动验证：\n   - 用 `/qzai plan-pr` 生成 Plan PR\n   - 再在 Plan PR 线程执行 `/qzai impl-pr`\n   - 在此过程中使用 `/qzai followup` 做“证据闭环”回执（至少包含 check-run/PR 链接）\n\n## 备注\n- 后续可扩展：把 followup 事件落盘到 `findings/followups.json`（只认证据）\n",
+    "labels": []
+  },
+  "snapshotAt": "2026-03-12T16:18:41.863Z"
+}
