@@ -3,7 +3,7 @@
 > 目的：让“不会忘/想绕也绕不过”的协作规范落到 GitHub，作为团队唯一真相源（SSOT）。
 > 适用范围：qzai-workflows 相关的所有自动化协作（/qzai 系列指令、PR/Issue 驱动的多 Agent 协作）。
 
-## P0：五条硬规则（Fail-closed）
+## P0：六条硬规则（Fail-closed）
 
 ### P0-1 身份门禁（GitHub 写操作必须用 GitHub App）
 **任何 GitHub 写操作**（push / commit / PR / issue_comment / review / label / close / merge）必须先切到对应 Agent 的 GitHub App 身份：
@@ -37,6 +37,22 @@ source scripts/gh_app_auth.sh --agent <agentId>
 - 未切 GitHub App 身份（P0-1）
 - 无 DoD/无验收口径
 - 无证据型交付（P0-2）
+
+### P0-6 PR 边界卫生（一个 PR 只做一件事，禁止串单）
+**任何 PR 在创建/更新前必须自检**，确保不会混入其他分支/其他任务的提交：
+
+- 分支必须从 `origin/main` 新建（或至少保证 merge-base = `origin/main`）：
+  ```bash
+  git fetch origin
+  git merge-base --is-ancestor origin/main HEAD
+  ```
+- 在提交 PR 前必须人工确认变更文件清单：
+  ```bash
+  git diff --name-only origin/main...HEAD
+  ```
+- 若发现“带入别的 PR 的提交/文件”（例如不相关的 workflow、meta.json 等）：
+  - 必须 `reset --hard origin/main` 后重新 `cherry-pick` 正确提交；或重开干净分支。
+  - 禁止“先开 PR 再慢慢清理”，避免浪费 review 成本。
 
 ---
 
