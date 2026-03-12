@@ -1,0 +1,10 @@
+{
+  "planKey": "i48-c4051032787",
+  "issue": {
+    "number": 48,
+    "title": "[Hook] GitHub Slash 命令 → OpenClaw Agent 过脑子 → 回写（方案B）",
+    "body": "## 背景\n当前 qzai-workflows 里的 workflow 只能做规则/静态检查，无法在 GitHub 事件触发后“驱动 OpenClaw agent 过脑子”，导致 /qzai review 等 slash 命令体系不够智能。\n\n## 目标\n为所有需要 agent 语义判断/架构审查/生成结论的 slash 命令提供一个统一桥接层：\n\nGitHub 事件 → Hook（鉴权/去重/排队）→ OpenClaw sessions_spawn → 产出结果 → GitHub 回写。\n\n本 Issue 以 trigger=B1（issue_comment 写 `/qzai <cmd>`）为 v1 入口，但设计必须可扩展到更多 slash 命令（不仅仅是 review）。\n\n## 范围（v1）\n- 入口：PR 的 issue_comment（如 `/qzai review`，后续可扩展 `/qzai <command> [args]`）\n- 动作：\n  1) 捕获命令 → 组装 payload（repo/pr/headSha/commentId 等）\n  2) 调用 Hook endpoint（HTTP POST）\n  3) OpenClaw 触发指定 agent 执行（sessions_spawn 或等价机制）\n  4) 结果回写到 PR（comment 或 review）\n\n## 关键设计点（必须）\n### 1) 统一 Slash 命令路由\n- 解析：从 comment body 解析 `/qzai <command>`\n- 命令白名单：只允许已注册的 command（fail-closed）\n- 命令版本化：payload 带 schemaVersion\n\n### 2) 安全（fail-closed）\n- 鉴权：HMAC/签名 + 时间戳 + nonce\n- 重放防护：过期拒绝 + nonce 只用一次\n- allowlist：只允许特定 repo/owner\n- 最小权限 GitHub App scopes（只读 PR + 写 comment/review）\n\n### 3) 幂等 / 去重 / 重跑\n- 幂等 key：`repo+pr+headSha+command+argsHash`\n- 同 key 正在跑则拒绝或合并\n- 支持强制重跑（例如 `/qzai rerun <runId>` 或 `/qzai review --force`）\n\n### 4) 可观测\n- 每次触发生成 runId\n- 失败原因可回写到 PR（简要）并在服务端记录详细日志\n\n## Payload 草案\n```json\n{\n  \"schemaVersion\": 1,\n  \"command\": \"review\",\n  \"args\": \"\",\n  \"repo\": \"qqchang2nd/qzai-workflows\",\n  \"prNumber\": 123,\n  \"headSha\": \"...\",\n  \"commentId\": 456,\n  \"commentUrl\": \"...\",\n  \"prUrl\": \"...\",\n  \"requestedBy\": \"login\",\n  \"requestedAt\": \"ISO-8601\"\n}\n```\n\n## DoD（验收）\n- 在 PR 评论输入 `/qzai review`：\n  - 能触发 Hook\n  - OpenClaw agent 产出中文 review\n  - 自动回写到 PR（带证据：文件/行号/commit/链接）\n- 鉴权/去重/重放防护生效（错误签名/过期请求会被拒绝）\n- 相同 headSha 不会重复跑（除非 --force）\n\n## 里程碑建议\n- v0：只做接收 + 鉴权 + 回写 ack（不触发 agent）\n- v1：接入 OpenClaw 执行 + 回写真实结果\n- v2：多 command、并行 agent、缓存/重试、队列化\n\n## 备注\n- trigger 选 B1（issue_comment）。后续可扩展 B2 label / B3 workflow_dispatch，但不作为 v1 必需。\n",
+    "labels": []
+  },
+  "snapshotAt": "2026-03-12T23:39:05.582Z"
+}
