@@ -1,38 +1,16 @@
-## 背景与目的
+## P0 协作门禁（必须勾选）
 
-（这次改动要解决什么问题？一句话说清楚。）
+- [ ] 我已使用 GitHub App 身份完成所有写操作（禁止人类账号绕过）
+  - 证据：粘贴一行文本即可：`Authenticated <agentId> (qzai-xxx)` 或 `gh auth status` 中 Active=app/qzai-xxx
+- [ ] 我已在 PR 内给出证据型交付（链接 + commit SHA + checks 状态）
+- [ ] 我已在 PR conversation 留中文摘要（3-6 行）+ next action（有后续才必填；无后续可写“无”）（IM 只发摘要+链接）
+- [ ] 我已自检 PR 边界（一个 PR 只做一件事；不混入其他分支/其他任务提交）
+  - 证据：贴出 `git diff --name-only origin/main...HEAD` 的关键文件列表
 
-## 关联 Issue（必填）
+## 变更摘要
 
-规则：二选一（默认不要同时写）
-- 计划类 PR：Refs #<issue-number>
-- 实现类 PR：Closes #<issue-number>（合并后自动关闭）
+（写 3-6 行中文）
 
-- Refs #<issue-number>
-- Closes #<issue-number>
+## 验证方式
 
-## 做了什么
-
-- 
-
-## DoD 自检清单
-
-- [ ] 变更范围明确，避免“顺手改一堆”
-- [ ] 关键逻辑有验证证据（见下方“测试与验证”）
-- [ ] 文档/注释已同步（如需要）
-- [ ] 风险与回滚已说明
-- [ ] 如使用 Projects 看板：已同步 Project 字段（Status/Priority 等）
-
-## 测试与验证
-
-- 自动化测试：
-- 手工验证步骤：
-
-## 风险与回滚
-
-- 风险点：
-- 回滚方式：
-
-## 署名
-
-**【Agent: <名字>】**
+（如何触发/复现/验证）
