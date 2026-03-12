@@ -54,6 +54,23 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+
+# Strict parameter validation (fail-closed)
+# --repo must be owner/repo
+if [[ -n "$REPO" ]] && ! [[ "$REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+  echo "❌ FAIL-CLOSED: --repo 格式非法（应为 owner/repo）：$REPO" >&2
+  exit 20
+fi
+# --pr / --issue must be positive integers
+if [[ -n "$PR_NUM" ]] && ! [[ "$PR_NUM" =~ ^[1-9][0-9]*$ ]]; then
+  echo "❌ FAIL-CLOSED: --pr 必须为正整数：$PR_NUM" >&2
+  exit 21
+fi
+if [[ -n "$ISSUE_NUM" ]] && ! [[ "$ISSUE_NUM" =~ ^[1-9][0-9]*$ ]]; then
+  echo "❌ FAIL-CLOSED: --issue 必须为正整数：$ISSUE_NUM" >&2
+  exit 22
+fi
+
 if [[ -z "$REPO" || -z "$BODY_FILE" ]]; then
   echo "❌ 缺少 --repo 或 --body-file" >&2
   usage
