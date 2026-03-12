@@ -87,3 +87,33 @@ jobs:
   - 额外约束（fail-closed）：Plan PR 分支必须存在 `.qzai/plans/<planKey>/PLAN.md`，且文件内必须包含 `## DoD` 区块。
 
 注意：为了避免与旧入口重复触发，本仓库的 wrapper 已对 `plan-pr/impl-pr` 做了互斥 guard。
+
+---
+
+## 评论发布（强约束：禁止字面量 \\n）
+
+为了避免在 PR/Issue 评论里出现字面量 `\\n`（导致可读性极差、且已多次复发），团队统一使用脚本发布评论（fail-closed）：
+
+- 脚本：`scripts/gh_safe_comment.sh`
+- 强约束：
+  1) `--body-file` 中出现字面量 `\\n` 会直接失败（必须用真实换行）；
+  2) 默认要求 GitHub 身份为 `qzai-xxx[bot]`（先 `source scripts/gh_app_auth.sh --agent <agentId>`）；
+
+示例：
+```bash
+source scripts/gh_app_auth.sh --agent <agentId>
+
+cat > /tmp/comment.md <<'EOF'
+### ✅ QZAI followup
+- item1
+- item2
+EOF
+
+scripts/gh_safe_comment.sh --repo <owner/repo> --pr <num> --body-file /tmp/comment.md
+```
+
+### 常见误用与替代写法
+- 误用：在正文里写 `\\n` 想表示换行（禁止，会 fail-closed）。
+- 正确：直接在 Markdown 文件里敲真实换行。
+- 如果你**必须展示**“字面量 `\\n` 这两个字符”（例如写教程/解释转义）：请拆开写，避免出现连续子串 `\\n`，例如：
+  - 写成 `` `\\` + `n` ``（两段 inline code），或 `\\` 后插入零宽空格再接 `n`。

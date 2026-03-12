@@ -23,6 +23,10 @@ source scripts/gh_app_auth.sh --agent <agentId>
 - commit SHA（或 review id / run url）
 - checks/CI 状态（通过/失败/无）
 
+补充（评论格式门禁）：
+- **禁止在 GitHub 评论中出现字面量 `\\n`**（必须用真实换行）。
+- 发布评论必须使用 `scripts/gh_safe_comment.sh`（fail-closed），不得直接 `gh pr comment --body "..."` 拼字符串。
+
 ### P0-3 双通道闭环（用户可见 + 上游可唤醒）
 由于异步/转发存在不可靠性，采用“显式双重汇报协议”，但**只在满足触发条件时强制**：
 
