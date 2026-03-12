@@ -1,0 +1,61 @@
+name: qzai-comment-hygiene
+
+on:
+  issue_comment:
+    types: [created, edited]
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  fix-escaped-newlines:
+    name: Fix literal \\n in qzai bot comments (safe)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get GitHub App token (reuse existing QZAI_APP_* secrets)
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.QZAI_APP_ID }}
+          private-key: ${{ secrets.QZAI_APP_PRIVATE_KEY }}
+
+      - name: Sanitize comment body (skip code)
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            const c = context.payload.comment;
+            if (!c) return;
+
+            const author = (c.user && c.user.login) ? c.user.login : '';
+            const isBot = author.endsWith('[bot]');
+            const isQzaiBot = author.startsWith('qzai-') || author === 'qzai-bot[bot]';
+            if (!isBot || !isQzaiBot) return;
+
+            const body = c.body || '';
+            if (!body.includes('\\n')) return;
+
+            // Fail-safe: avoid rewriting code semantics.
+            // If comment contains fenced code blocks or inline code, do NOT auto-rewrite.
+            const hasFenced = /```[\s\S]*?```/m.test(body);
+            const hasInline = /`[^`\n]*\\n[^`\n]*`/.test(body) || /`[^`]*`/.test(body);
+            if (hasFenced || hasInline) {
+              core.notice(`Skip sanitize: contains code (fenced=${hasFenced}, inline=${hasInline}), comment_id=${c.id}`);
+              return;
+            }
+
+            const fixed = body.replace(/\\n/g, '\n');
+            if (fixed === body) return;
+
+            await github.rest.issues.updateComment({
+              owner,
+              repo,
+              comment_id: c.id,
+              body: fixed
+            });
+
+            core.notice(`Sanitized literal \\n in comment_id=${c.id}`);
