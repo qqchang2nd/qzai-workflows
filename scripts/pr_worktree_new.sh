@@ -15,16 +15,14 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 用法:
-  pr_worktree_new.sh --branch <branch> [--dir <worktree_dir>] [--base <base_ref>]
+  pr_worktree_new.sh --branch <branch> [--dir <worktree_dir>]
 
 参数:
   --branch   新 PR 分支名（必填），例如: chore/comment-hygiene
   --dir      worktree 目录（可选）。默认: ../worktrees/<branch>（斜杠会被替换为 -）
-  --base     基线分支/引用（可选）。默认: origin/main
-
 行为（fail-closed）:
   1) 强制 git fetch origin
-  2) 强制基于 <base> 创建分支并建立独立 worktree
+  2) 强制基于 origin/main 创建分支并建立独立 worktree
   3) 完成后打印下一步指令（cd 进入目录）
 USAGE
 }
@@ -37,7 +35,6 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --branch) BRANCH="$2"; shift 2;;
     --dir) DIR="$2"; shift 2;;
-    --base) BASE="$2"; shift 2;;
     -h|--help|help) usage; exit 0;;
     *) echo "❌ 未知参数: $1" >&2; usage; exit 2;;
   esac
