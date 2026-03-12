@@ -10,17 +10,17 @@ permissions:
 
 jobs:
   fix-escaped-newlines:
-    name: Fix literal \\n in bot comments
+    name: Fix literal \\n in qzai bot comments (safe)
     runs-on: ubuntu-latest
     steps:
-      - name: Get GitHub App token (qzai-bot)
+      - name: Get GitHub App token (reuse existing QZAI_APP_* secrets)
         id: app-token
         uses: actions/create-github-app-token@v1
         with:
-          app-id: ${{ secrets.QZAI_BOT_APP_ID }}
-          private-key: ${{ secrets.QZAI_BOT_PRIVATE_KEY }}
+          app-id: ${{ secrets.QZAI_APP_ID }}
+          private-key: ${{ secrets.QZAI_APP_PRIVATE_KEY }}
 
-      - name: Sanitize comment body
+      - name: Sanitize comment body (skip code)
         uses: actions/github-script@v7
         with:
           github-token: ${{ steps.app-token.outputs.token }}
@@ -37,8 +37,16 @@ jobs:
             if (!isBot || !isQzaiBot) return;
 
             const body = c.body || '';
-            // Detect literal backslash-n sequences in markdown ("\\n"), which should be real newlines.
             if (!body.includes('\\n')) return;
+
+            // Fail-safe: avoid rewriting code semantics.
+            // If comment contains fenced code blocks or inline code, do NOT auto-rewrite.
+            const hasFenced = /```[\s\S]*?```/m.test(body);
+            const hasInline = /`[^`\n]*\\n[^`\n]*`/.test(body) || /`[^`]*`/.test(body);
+            if (hasFenced || hasInline) {
+              core.notice(`Skip sanitize: contains code (fenced=${hasFenced}, inline=${hasInline}), comment_id=${c.id}`);
+              return;
+            }
 
             const fixed = body.replace(/\\n/g, '\n');
             if (fixed === body) return;
