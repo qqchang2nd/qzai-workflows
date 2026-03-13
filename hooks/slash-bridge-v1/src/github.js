@@ -39,6 +39,13 @@ export async function createIssueComment({ token, owner, repo, issueNumber, body
   });
 }
 
+export async function updateIssueComment({ token, owner, repo, commentId, body }) {
+  return ghFetch(token, `/repos/${owner}/${repo}/issues/comments/${commentId}`, {
+    method: 'PATCH',
+    body: { body },
+  });
+}
+
 export async function createCheckRun({ token, owner, repo, headSha, name, title, summary, conclusion = 'success' }) {
   return ghFetch(token, `/repos/${owner}/${repo}/check-runs`, {
     method: 'POST',

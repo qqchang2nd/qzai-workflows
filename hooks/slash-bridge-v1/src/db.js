@@ -27,6 +27,7 @@ export async function openDb(dbPath) {
       trace_id TEXT NOT NULL,
       run_id TEXT NOT NULL,
       parent_run_id TEXT,
+      ack_comment_id INTEGER,
       final_json TEXT
     );
 
@@ -48,6 +49,9 @@ export async function openDb(dbPath) {
     CREATE INDEX IF NOT EXISTS idx_commands_expires ON commands(expires_at_ms);
     CREATE INDEX IF NOT EXISTS idx_dead_letters_created ON dead_letters(created_at_ms);
   `);
+
+  // Backward-compatible migrations (best-effort)
+  try { await db.exec('ALTER TABLE commands ADD COLUMN ack_comment_id INTEGER'); } catch {}
 
   return db;
 }

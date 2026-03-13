@@ -62,10 +62,12 @@ jobs:
             // - collapse all whitespace runs into a single space
             const normalized = firstLine.trim().replace(/\s+/g, ' ');
 
-            const isReview = normalized === '/qzai review';
+            // /qzai review 已迁移到 Slash Bridge v1（Actions -> Hook）。
+            // 这里仅保留 /qzai apply-review，避免双触发刷屏；不做任何 review 兼容。
             const isApply = normalized === '/qzai apply-review';
+            const isReview = false;
             if (!isReview && !isApply) {
-              core.info('Skip: first line is not a normalized /qzai review or /qzai apply-review');
+              core.info('Skip: first line is not a normalized /qzai apply-review');
               core.setOutput('skip', '1');
               return;
             }
