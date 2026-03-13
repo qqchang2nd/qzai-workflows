@@ -643,13 +643,23 @@ jobs:
             // The actual authorization check for `agentId` (implAgentId) is done in the `Select agent GitHub App secrets` step.
             // The `planAgentId` is extracted from the plan PR body.
 
-            let planSnapshotSha = planPr.data.head?.sha || '';
-            if (!planSnapshotSha) {
+            // Bind attestation to the *plan snapshot sha* (not the moving plan PR head sha).
+            // Priority:
+            // 1) parse planSnapshotSha from plan PR body
+            // 2) fallback to plan PR head sha (risky) with a warning
+            let planSnapshotSha = '';
+            {
               const shaMatch = planBody.match(/\bplanSnapshotSha:\s*`?([0-9a-f]{40})`?/i);
               if (shaMatch) planSnapshotSha = shaMatch[1];
             }
             if (!planSnapshotSha) {
-              core.setFailed('Fail-closed: cannot determine planSnapshotSha (plan PR head sha missing and body has no planSnapshotSha).');
+              planSnapshotSha = planPr.data.head?.sha || '';
+              if (planSnapshotSha) {
+                core.warning('Fallback: planSnapshotSha missing in plan PR body; using plan PR head sha (may be unstable if plan PR was pushed).');
+              }
+            }
+            if (!planSnapshotSha) {
+              core.setFailed('Fail-closed: cannot determine planSnapshotSha (plan PR body has no planSnapshotSha and head sha is missing).');
               return;
             }
 
