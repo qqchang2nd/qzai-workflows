@@ -120,7 +120,6 @@ curl -sS -X POST 'http://127.0.0.1:8787/hooks/slash-bridge-v1' \
 | `security` | `jingwuming` | 进行安全相关检查与建议（偏安全类）。 |
 
 > v1：用户在评论里指定 agentId 默认不支持（由 hook 侧路由表决定）。
-> 兼容：短期保留 `plan` 作为 `plan-pr` 的 alias（文档以 `plan-pr` 为准）。
 
 ### 输出（ACK / Final）
 

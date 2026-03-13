@@ -30,10 +30,7 @@ function reason(reasonCode, detail) {
 
 function defaultRoute(command) {
   const map = {
-    'plan-pr': 'luxiaofeng',
-    // Backward-compatible alias (v1): treat `plan` as `plan-pr`.
-    plan: 'luxiaofeng',
-    review: 'afei',
+    'plan-pr': 'luxiaofeng',    review: 'afei',
     security: 'jingwuming',
   };
   return map[String(command || '').trim()] || null;
