@@ -896,6 +896,7 @@ jobs:
         env:
           PR_URL: ${{ steps.cpr-impl.outputs.pull-request-url || steps.impl.outputs.existingPrUrl }}
           PLAN_URL: ${{ steps.cmd.outputs.planUrl }}
+          IMPL_KEY: ${{ steps.impl.outputs.implKey }}
           PLAN_AGENT_ID: ${{ steps.impl.outputs.planAgentId }}
           IMPL_AGENT_ID: ${{ steps.impl.outputs.implAgentId }}
         with:
@@ -913,6 +914,7 @@ jobs:
                 '### ✅ QZAI impl-pr',
                 url ? `Impl PR: ${url}` : 'Impl PR: (unknown)',
                 `Plan: ${process.env.PLAN_URL}`,
+                `implKey: ${process.env.IMPL_KEY}`,
                 '',
                 `- planAgentId: \`${process.env.PLAN_AGENT_ID}\``,
                 `- implAgentId: \`${process.env.IMPL_AGENT_ID}\``
