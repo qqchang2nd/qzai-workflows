@@ -3,7 +3,7 @@ import { URL } from 'node:url';
 
 import { openDb, cleanupExpired } from './db.js';
 import { computeHmacSha256Hex, timingSafeEqualHex, randomId, sha256Hex } from './crypto.js';
-import { createIssueComment, createCheckRun, withRetry } from './github.js';
+import { createIssueComment, updateIssueComment, createCheckRun, withRetry } from './github.js';
 
 const DEFAULT_PORT = 8787;
 const MAX_BODY_BYTES = 1024 * 1024; // 1MB
@@ -30,10 +30,22 @@ function reason(reasonCode, detail) {
 
 function defaultRoute(command) {
   const map = {
-    'plan-pr': 'luxiaofeng',    review: 'afei',
+    'plan-pr': 'luxiaofeng',
+    review: 'afei',
     security: 'jingwuming',
   };
   return map[String(command || '').trim()] || null;
+}
+
+function parseOverrideAgentId(payload) {
+  const v = String(payload?.agentId || '').trim();
+  return v || null;
+}
+
+function isOverrideAgentAllowed(agentId) {
+  // v1: allow overriding to a small allowlist to avoid command -> arbitrary agent escalation.
+  const allowed = new Set(['main', 'luxiaofeng', 'afei', 'jingwuming', 'lengyan', 'lixunhuan', 'aji']);
+  return allowed.has(String(agentId || '').trim());
 }
 
 function parseAllowedRepos(s) {
@@ -281,7 +293,15 @@ async function main() {
       const command = String(payload.command).trim();
       const args = String(payload.args || '').trim();
 
-      const routedAgent = defaultRoute(command);
+      const overrideAgent = parseOverrideAgentId(payload);
+      if (overrideAgent && !isOverrideAgentAllowed(overrideAgent)) {
+        const ack = { accepted: false, ...ackBase, ...reason('AGENT_NOT_ALLOWED', `agentId not allowed: ${overrideAgent}`) };
+        await db.run('INSERT INTO deliveries(delivery_id, created_at_ms, ack_json) VALUES(?,?,?)', deliveryId, now, JSON.stringify(ack));
+        await withRetry(() => createIssueComment({ token: ghToken, owner, repo, issueNumber, body: formatAck(ack, payload) }));
+        return json(res, 200, { ok: true, ack });
+      }
+
+      const routedAgent = overrideAgent || defaultRoute(command);
       if (!routedAgent) {
         const ack = { accepted: false, ...ackBase, ...reason('ROUTE_NOT_FOUND', `unknown command: ${command}`) };
         await db.run('INSERT INTO deliveries(delivery_id, created_at_ms, ack_json) VALUES(?,?,?)', deliveryId, now, JSON.stringify(ack));
@@ -290,7 +310,7 @@ async function main() {
       }
 
       const idemKey = String(payload.idempotencyKey);
-      const prevCmd = await db.get('SELECT status, run_id, final_json FROM commands WHERE idempotency_key = ?', idemKey);
+      const prevCmd = await db.get('SELECT status, run_id, final_json, ack_comment_id FROM commands WHERE idempotency_key = ?', idemKey);
       if (prevCmd) {
         const ack = {
           accepted: true,
@@ -305,16 +325,6 @@ async function main() {
         return json(res, 200, { ok: true, ack, final: prevCmd.final_json ? JSON.parse(prevCmd.final_json) : null });
       }
 
-      await db.run(
-        'INSERT INTO commands(idempotency_key, created_at_ms, expires_at_ms, status, trace_id, run_id) VALUES(?,?,?,?,?,?)',
-        idemKey,
-        now,
-        now + 7 * 24 * 60 * 60 * 1000,
-        'in_progress',
-        traceId,
-        runId
-      );
-
       const ack = {
         accepted: true,
         ...ackBase,
@@ -327,7 +337,20 @@ async function main() {
       // Normal path MUST store deliveryId -> ack_json before returning.
       await db.run('INSERT INTO deliveries(delivery_id, created_at_ms, ack_json) VALUES(?,?,?)', deliveryId, now, JSON.stringify(ack));
 
-      await withRetry(() => createIssueComment({ token: ghToken, owner, repo, issueNumber, body: formatAck(ack, payload) }));
+      const ackComment = await withRetry(() => createIssueComment({ token: ghToken, owner, repo, issueNumber, body: formatAck(ack, payload) }));
+      const ackCommentId = ackComment?.id ? Number(ackComment.id) : null;
+
+      // Persist command row (includes ack_comment_id for single-comment writeback strategy).
+      await db.run(
+        'INSERT INTO commands(idempotency_key, created_at_ms, expires_at_ms, status, trace_id, run_id, ack_comment_id) VALUES(?,?,?,?,?,?,?)',
+        idemKey,
+        now,
+        now + 7 * 24 * 60 * 60 * 1000,
+        'in_progress',
+        traceId,
+        runId,
+        ackCommentId
+      );
 
       setTimeout(async () => {
         const final = {
@@ -339,26 +362,26 @@ async function main() {
         };
 
         try {
-          await withRetry(() => createIssueComment({
-            token: ghToken,
-            owner,
-            repo,
-            issueNumber,
-            body: formatFinal(final, payload),
-          }));
-
-          if (payload.headSha) {
-            await withRetry(() => createCheckRun({
+          const row = await db.get('SELECT ack_comment_id FROM commands WHERE idempotency_key=?', idemKey);
+          if (row?.ack_comment_id) {
+            await withRetry(() => updateIssueComment({
               token: ghToken,
               owner,
               repo,
-              headSha: payload.headSha,
-              name: 'slash-bridge-v1/final',
-              title: 'Slash Bridge v1 Final',
-              summary: formatFinal(final, payload),
-              conclusion: 'success',
+              commentId: row.ack_comment_id,
+              body: [formatAck(ack, payload), '', formatFinal(final, payload)].join('\n'),
+            }));
+          } else {
+            await withRetry(() => createIssueComment({
+              token: ghToken,
+              owner,
+              repo,
+              issueNumber,
+              body: formatFinal(final, payload),
             }));
           }
+
+          // v1: do not write check-runs by default (noisy + may 403). Final is visible via the single bot comment.
 
           await db.run('UPDATE commands SET status=?, final_json=? WHERE idempotency_key=?', 'completed', JSON.stringify(final), idemKey);
         } catch (e) {
@@ -382,18 +405,7 @@ async function main() {
               body: formatFinal(errFinal, payload),
             }), { retries: 2, baseDelayMs: 800 });
 
-            if (payload.headSha) {
-              await withRetry(() => createCheckRun({
-                token: ghToken,
-                owner,
-                repo,
-                headSha: payload.headSha,
-                name: 'slash-bridge-v1/final',
-                title: 'Slash Bridge v1 Final (failed)',
-                summary: formatFinal(errFinal, payload),
-                conclusion: 'failure',
-              }), { retries: 2, baseDelayMs: 800 });
-            }
+            // v1: no check-run writeback (avoid noisy failures).
           } catch (e2) {
             const deadId = sha256Hex(`${traceId}#${runId}#${Date.now()}`);
             await db.run(
