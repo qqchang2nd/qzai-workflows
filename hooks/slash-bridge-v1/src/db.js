@@ -30,8 +30,25 @@ export async function openDb(dbPath) {
       final_json TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS rate_limits (
+      key TEXT PRIMARY KEY,
+      window_start_ms INTEGER NOT NULL,
+      count INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS dead_letters (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      run_id TEXT,
+      trace_id TEXT,
+      stage TEXT,
+      error TEXT,
+      created_at_ms INTEGER NOT NULL
+    );
+
+
     CREATE INDEX IF NOT EXISTS idx_nonces_expires ON nonces(expires_at_ms);
     CREATE INDEX IF NOT EXISTS idx_commands_expires ON commands(expires_at_ms);
+    CREATE INDEX IF NOT EXISTS idx_dead_letters_created ON dead_letters(created_at_ms);
   `);
 
   return db;
