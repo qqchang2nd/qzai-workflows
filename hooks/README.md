@@ -136,3 +136,23 @@ curl -sS -X POST 'http://127.0.0.1:8787/hooks/slash-bridge-v1' \
 - [ ] `/qzai review` -> ACK + Final（agentId= afei）
 - [ ] `/qzai security` -> ACK + Final（agentId= jingwuming）
 - [ ] `/qzai unknown` -> ACK 拒绝（ROUTE_NOT_FOUND），无 Final
+
+
+### Actions command ↔ Hook command 映射（避免命名漂移）
+
+> 说明：本 PR 的 hook server 使用 `payload.command` 作为路由键；Actions 侧从评论首行 `/qzai <token>` 解析得到 `<token>` 并直接写入 `payload.command`。
+
+当前 v1 仅保证最小闭环命令集可跑通（见上表）。其它命令会 fail-closed。
+
+| 用户输入（GitHub comment 首行） | Actions 解析 token | hook payload.command | hook 路由结果 |
+|---|---|---|---|
+| `/qzai plan` | `plan` | `plan` | `luxiaofeng` |
+| `/qzai review` | `review` | `review` | `afei` |
+| `/qzai security` | `security` | `security` | `jingwuming` |
+| `/qzai plan-pr` | `plan-pr` | `plan-pr` | fail-closed `ROUTE_NOT_FOUND`（v1 不实现） |
+| `/qzai impl-pr` | `impl-pr` | `impl-pr` | fail-closed `ROUTE_NOT_FOUND`（v1 不实现） |
+| `/qzai followup` | `followup` | `followup` | fail-closed `ROUTE_NOT_FOUND`（v1 不实现） |
+
+建议 roadmap（不在本 PR 扩 scope）：
+- v1.1：补齐 `plan-pr/impl-pr/followup` 的 command 解析与 payload schema（包含 plan url / pr context），hook 侧路由到对应 agent；仍由 agent 执行并回写。
+- v2：统一命令命名与 spec（例如将 `plan-pr/impl-pr` 作为 `plan/impl` 的 mode 参数），并完善 args schema / policy。
