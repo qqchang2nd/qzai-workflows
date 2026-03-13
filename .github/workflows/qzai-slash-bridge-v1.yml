@@ -152,6 +152,7 @@ jobs:
           
           req = urllib.request.Request(url, data=body, method='POST')
           req.add_header('Content-Type', 'application/json')
+          req.add_header('User-Agent', 'curl/8.0')
           req.add_header('X-Hub-Signature-256', 'sha256=' + mac)
           req.add_header('X-QZAI-Timestamp', str(ts))
           req.add_header('X-QZAI-Nonce', nonce)
