@@ -235,17 +235,22 @@ async function main() {
 
       const expectedInst = allowedRepos.get(repoFull);
       const instId = Number(payload.installationId);
-      if (!Number.isFinite(instId) || instId <= 0) {
-        const ack = { accepted: false, ...ackBase, ...reason('ARGS_INVALID', 'invalid installationId') };
-        await db.run('INSERT INTO deliveries(delivery_id, created_at_ms, ack_json) VALUES(?,?,?)', deliveryId, now, JSON.stringify(ack));
-        await withRetry(() => createIssueComment({ token: ghToken, owner, repo, issueNumber, body: formatAck(ack, payload) }));
-        return json(res, 200, { ok: true, ack });
-      }
-      if (expectedInst && instId !== expectedInst) {
-        const ack = { accepted: false, ...ackBase, ...reason('INSTALLATION_MISMATCH', `installation mismatch: expected ${expectedInst} got ${instId}`) };
-        await db.run('INSERT INTO deliveries(delivery_id, created_at_ms, ack_json) VALUES(?,?,?)', deliveryId, now, JSON.stringify(ack));
-        await withRetry(() => createIssueComment({ token: ghToken, owner, repo, issueNumber, body: formatAck(ack, payload) }));
-        return json(res, 200, { ok: true, ack });
+      // installationId allowlist is optional in v1:
+      // - If repo allowlist entry includes an installationId, enforce exact match (fail-closed).
+      // - If not provided (null), we only enforce repo allowlist and do NOT require installationId.
+      if (expectedInst !== null && expectedInst !== undefined) {
+        if (!Number.isFinite(instId) || instId <= 0) {
+          const ack = { accepted: false, ...ackBase, ...reason('ARGS_INVALID', 'invalid installationId') };
+          await db.run('INSERT INTO deliveries(delivery_id, created_at_ms, ack_json) VALUES(?,?,?)', deliveryId, now, JSON.stringify(ack));
+          await withRetry(() => createIssueComment({ token: ghToken, owner, repo, issueNumber, body: formatAck(ack, payload) }));
+          return json(res, 200, { ok: true, ack });
+        }
+        if (instId !== expectedInst) {
+          const ack = { accepted: false, ...ackBase, ...reason('INSTALLATION_MISMATCH', `installation mismatch: expected ${expectedInst} got ${instId}`) };
+          await db.run('INSERT INTO deliveries(delivery_id, created_at_ms, ack_json) VALUES(?,?,?)', deliveryId, now, JSON.stringify(ack));
+          await withRetry(() => createIssueComment({ token: ghToken, owner, repo, issueNumber, body: formatAck(ack, payload) }));
+          return json(res, 200, { ok: true, ack });
+        }
       }
 
       if (!isAuthorAllowed(payload.authorAssociation, { extraAllow: authorAssocExtra })) {
