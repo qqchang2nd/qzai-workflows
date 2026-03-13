@@ -63,12 +63,11 @@ jobs:
             const normalized = firstLine.trim().replace(/\s+/g, ' ');
 
             // /qzai review 已迁移到 Slash Bridge v1（Actions -> Hook）。
-            // 这里保留 /qzai apply-review（以及旧 review 的兼容入口 review-legacy），避免双触发刷屏。
-            const isReviewLegacy = normalized === '/qzai review-legacy';
+            // 这里仅保留 /qzai apply-review，避免双触发刷屏；不做任何 review 兼容。
             const isApply = normalized === '/qzai apply-review';
-            const isReview = isReviewLegacy;
+            const isReview = false;
             if (!isReview && !isApply) {
-              core.info('Skip: first line is not a normalized /qzai review-legacy or /qzai apply-review');
+              core.info('Skip: first line is not a normalized /qzai apply-review');
               core.setOutput('skip', '1');
               return;
             }
@@ -110,9 +109,6 @@ jobs:
             }
 
             core.setOutput('action', isReview ? 'review' : 'apply');
-            if (isReviewLegacy) {
-              core.setOutput('legacy', '1');
-            }
             core.setOutput('agentId', String(kv.agentId).trim());
 
       - name: Select agent GitHub App secrets (fail-closed)
