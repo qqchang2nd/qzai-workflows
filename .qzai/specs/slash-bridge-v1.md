@@ -4,13 +4,16 @@
 > 范围：GitHub `issue_comment` -> Hook -> OpenClaw Agent -> GitHub 回写
 
 ## 1. 端到端数据流
+
+默认分发模式：**方案 A（Hook 直连执行独立 Agent）**。
+
 1) 接收 GitHub `issue_comment` webhook，解析首行 slash 命令。  
 2) 预检：命令白名单、作者策略、repo/installation allowlist。  
 3) 安全门禁：签名/时间戳/nonce 校验（fail-closed）。  
 4) 双层去重：
    - 传输级：`deliveryId`（`X-GitHub-Delivery`）
    - 命令级：`idempotencyKey`（见第 3 节）
-5) 分发执行：生成 `traceId/runId`，入队并调用 OpenClaw（`sessions_spawn` 或等价）。  
+5) 分发执行（默认方案 A）：生成 `traceId/runId` 后，Hook 侧**直连触发目标独立 Agent**执行（不经二次 A2A 中转）。  
 6) 回写 GitHub：
    - 快速 ACK（accepted/rejected + runId）
    - Final 结果（comment/review/check-run，按命令配置）
@@ -65,12 +68,14 @@
   - `command`
   - `argsHash`
   - `requestedBy`
+  - `commentId`（或 `commandIndex`，二选一但需稳定）
 - 存储：可持久化 KV/DB（TTL 建议 `7d`）
+- 建议最终 key 形态：`repo#issueOrPr#headSha#command#argsHash#requestedBy#commentId`。
 - 状态语义：
   - `in_progress`：返回已有 `runId`（`status=IN_PROGRESS`）
   - `completed`：返回上次 Final 结果引用（`status=ALREADY_DONE`）
   - `failed`：可按策略允许重试
-- 强制重跑：需显式 `--force`；记录 `parentRunId`
+- 强制重跑：需显式 `--force`；语义为“绕过命令级幂等”，但仍保留 `deliveryId` 传输去重；并记录 `parentRunId`。
 
 ## 4. Payload Schema v1（字段 + 来源）
 
@@ -94,7 +99,7 @@
   "baseSha": "123456...",
   "requestedBy": "qqchang2nd",
   "requestedAt": "2026-03-12T23:39:05Z",
-  "idempotencyKey": "repo#pr#head#command#argsHash#actor"
+  "idempotencyKey": "repo#pr#head#command#argsHash#actor#commentId"
 }
 ```
 
@@ -103,6 +108,27 @@
 字段可信度要求：
 - 来自 webhook：`deliveryId/commentId/requestedBy/requestedAt`（需签名校验通过）
 - 需二次查询 GitHub API：`headSha/baseSha/prNumber/installationId`（防伪造）
+
+
+## 4.1 command -> agentId 路由规则（方案 A 核心）
+
+### 默认路由表（v1）
+- `review` -> `afei`
+- `security` -> `jingwuming`
+- `plan` -> `luxiaofeng`
+
+> 路由表来源：受控配置（仓库配置文件或服务端配置），必须可审计。
+
+### 是否允许用户指定 agentId
+- 默认：**禁止**在 comment 中任意指定 `agentId`。
+- 可选放开：仅当 `agentId` 在命令级 allowlist 中且调用者具备对应权限策略时允许。
+
+### 失败与回写（fail-closed）
+- 未命中路由：`ROUTE_NOT_FOUND`
+- 命中但 agent 不在 allowlist：`AGENT_NOT_ALLOWED`
+- 指定 agent 与策略冲突：`AGENT_POLICY_DENIED`
+
+以上情况均：拒绝执行 + ACK 回写 reasonCode + traceId。
 
 ## 5. 失败模式与回写策略
 
