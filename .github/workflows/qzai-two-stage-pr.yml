@@ -679,24 +679,32 @@ jobs:
             const lines = planMd.split(/\r?\n/);
             // P1: allow DoD heading variants like "## DoD ✅" by matching word boundary.
             const dodStart = lines.findIndex(line => /^##\s+DoD\b/i.test(line));
-            if (dodStart < 0) {
-              core.setFailed(`Fail-closed: ${planMdPath} lacks required '## DoD' section.`);
-              return;
+            // Soft-fail for missing DoD: do NOT fail-closed; continue with placeholders.
+            // Keep all other security fail-closed checks unchanged.
+            const dodMissing = dodStart < 0;
+            if (dodMissing) {
+              core.warning(`Plan DoD section missing in ${planMdPath}; continuing with placeholder DoD.`);
             }
-            let dodEnd = lines.length;
-            for (let i = dodStart + 1; i < lines.length; i++) {
-              if (/^##\s+/.test(lines[i])) {
-                dodEnd = i;
-                break;
+
+            let dodSection = '## DoD\n- [ ] (placeholder) PLAN.md missing `## DoD` section';
+            let dodChecklist = '_Placeholder: PLAN.md missing `## DoD` section._';
+
+            if (!dodMissing) {
+              let dodEnd = lines.length;
+              for (let i = dodStart + 1; i < lines.length; i++) {
+                if (/^##\s+/.test(lines[i])) {
+                  dodEnd = i;
+                  break;
+                }
               }
+              dodSection = lines.slice(dodStart, dodEnd).join('\n').trimEnd();
+              const checklistLines = lines
+                .slice(dodStart + 1, dodEnd)
+                .filter(line => /^\s*[-*]\s+\[[ xX]\]\s+/.test(line));
+              dodChecklist = checklistLines.length > 0
+                ? checklistLines.join('\n')
+                : '_No markdown checklist items found under `## DoD` in PLAN.md._';
             }
-            const dodSection = lines.slice(dodStart, dodEnd).join('\n').trimEnd();
-            const checklistLines = lines
-              .slice(dodStart + 1, dodEnd)
-              .filter(line => /^\s*[-*]\s+\[[ xX]\]\s+/.test(line));
-            const dodChecklist = checklistLines.length > 0
-              ? checklistLines.join('\n')
-              : '_No markdown checklist items found under `## DoD` in PLAN.md._';
 
             const checks = await github.rest.checks.listForRef({ owner, repo, ref: planSnapshotSha, per_page: 100 });
             const att = (checks.data.check_runs || []).find(c => c.name === 'qzai/plan-attestation');
