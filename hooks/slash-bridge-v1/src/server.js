@@ -184,7 +184,7 @@ async function main() {
       if (!allowedRepos.has(repoFull)) {
         const ack = { accepted: false, ...ackBase, ...reason('REPO_NOT_ALLOWED', `repo not allowed: ${repoFull}`) };
         await withRetry(() => createIssueComment({ token: ghToken, owner, repo, issueNumber, body: formatAck(ack, payload) }));
-        await db.run('INSERT OR REPLACE INTO deliveries(delivery_id, created_at_ms, ack_json) VALUES(?,?,?)', payload.deliveryId, now, JSON.stringify(ack));
+        await db.run('INSERT OR REPLACE INTO deliveries(delivery_id, created_at_ms, ack_json) VALUES(?,?,?)', deliveryId, now, JSON.stringify(ack));
         return json(res, 200, { ok: true, ack });
       }
       const expectedInst = allowedRepos.get(repoFull);
@@ -192,7 +192,7 @@ async function main() {
       if (expectedInst && instId !== expectedInst) {
         const ack = { accepted: false, ...ackBase, ...reason('INSTALLATION_MISMATCH', `installation mismatch: expected ${expectedInst} got ${instId}`) };
         await withRetry(() => createIssueComment({ token: ghToken, owner, repo, issueNumber, body: formatAck(ack, payload) }));
-        await db.run('INSERT OR REPLACE INTO deliveries(delivery_id, created_at_ms, ack_json) VALUES(?,?,?)', payload.deliveryId, now, JSON.stringify(ack));
+        await db.run('INSERT OR REPLACE INTO deliveries(delivery_id, created_at_ms, ack_json) VALUES(?,?,?)', deliveryId, now, JSON.stringify(ack));
         return json(res, 200, { ok: true, ack });
       }
 
@@ -200,7 +200,7 @@ async function main() {
       if (!isAuthorAllowed(payload.authorAssociation)) {
         const ack = { accepted: false, ...ackBase, ...reason('AUTHOR_NOT_ALLOWED', `author_association=${payload.authorAssociation}`) };
         await withRetry(() => createIssueComment({ token: ghToken, owner, repo, issueNumber, body: formatAck(ack, payload) }));
-        await db.run('INSERT OR REPLACE INTO deliveries(delivery_id, created_at_ms, ack_json) VALUES(?,?,?)', payload.deliveryId, now, JSON.stringify(ack));
+        await db.run('INSERT OR REPLACE INTO deliveries(delivery_id, created_at_ms, ack_json) VALUES(?,?,?)', deliveryId, now, JSON.stringify(ack));
         return json(res, 200, { ok: true, ack });
       }
 
@@ -216,7 +216,7 @@ async function main() {
           if (count + 1 > rateLimitMax) {
             const ack = { accepted: false, ...ackBase, ...reason('RATE_LIMITED', `limit=${rateLimitMax}/${rateLimitWindowMs}ms key=${rlKey}`) };
             await withRetry(() => createIssueComment({ token: ghToken, owner, repo, issueNumber, body: formatAck(ack, payload) }));
-            await db.run('INSERT OR REPLACE INTO deliveries(delivery_id, created_at_ms, ack_json) VALUES(?,?,?)', payload.deliveryId, now, JSON.stringify(ack));
+            await db.run('INSERT OR REPLACE INTO deliveries(delivery_id, created_at_ms, ack_json) VALUES(?,?,?)', deliveryId, now, JSON.stringify(ack));
             return json(res, 200, { ok: true, ack });
           }
           await db.run('INSERT OR REPLACE INTO rate_limits(key, window_start_ms, count) VALUES(?,?,?)', rlKey, windowStart, count + 1);
