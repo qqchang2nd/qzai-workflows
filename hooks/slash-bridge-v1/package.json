@@ -1,0 +1,15 @@
+{
+  "name": "slash-bridge-v1",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "QZAI slash-bridge v1 hook server (Actions -> HTTP -> Hook -> Agent -> GitHub writeback)",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "sqlite": "^5.1.1",
+    "sqlite3": "^5.1.7"
+  }
+}
