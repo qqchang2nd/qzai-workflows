@@ -54,16 +54,16 @@ async function ghFetchApp(path, { method = 'GET', body, headers = {} } = {}) {
 
 let cached = null; // { token, expiresAtMs }
 
-export async function getGitHubTokenFromEnv() {
+export async function getGitHubTokenFromEnv({ installationId } = {}) {
   const direct = String(process.env.GITHUB_TOKEN || '').trim();
   if (direct) return direct;
 
   const appId = String(process.env.SLASH_BRIDGE_GH_APP_ID || '').trim();
   const keyPath = String(process.env.SLASH_BRIDGE_GH_APP_PRIVATE_KEY_PATH || '').trim();
-  const installationId = String(process.env.SLASH_BRIDGE_GH_APP_INSTALLATION_ID || '').trim();
+  const inst = String(installationId || process.env.SLASH_BRIDGE_GH_APP_INSTALLATION_ID || '').trim();
 
-  if (!appId || !keyPath || !installationId) {
-    throw new Error('Missing GitHub auth env: set either GITHUB_TOKEN or (SLASH_BRIDGE_GH_APP_ID + SLASH_BRIDGE_GH_APP_PRIVATE_KEY_PATH + SLASH_BRIDGE_GH_APP_INSTALLATION_ID)');
+  if (!appId || !keyPath || !inst) {
+    throw new Error('Missing GitHub auth env: set either GITHUB_TOKEN or (SLASH_BRIDGE_GH_APP_ID + SLASH_BRIDGE_GH_APP_PRIVATE_KEY_PATH + installationId)');
   }
 
   const now = Date.now();
@@ -74,7 +74,7 @@ export async function getGitHubTokenFromEnv() {
   const privateKeyPem = fs.readFileSync(keyPath, 'utf8');
   const jwt = signJwt({ appId, privateKeyPem });
 
-  const data = await ghFetchApp(`/app/installations/${installationId}/access_tokens`, {
+  const data = await ghFetchApp(`/app/installations/${inst}/access_tokens`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${jwt}`,
