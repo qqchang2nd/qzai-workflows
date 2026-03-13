@@ -108,65 +108,65 @@ jobs:
           fi
 
           python3 - <<'PY'
-          import json, os, time, secrets, hmac, hashlib, urllib.request
-          
-          hook_base = os.environ['HOOK_BASE_URL'].rstrip('/')
-          url = hook_base + '/hooks/slash-bridge-v1'
-          secret = os.environ['HOOK_SECRET'].encode()
-          
-          command = os.environ['COMMAND']
-          args = os.environ.get('ARGS','')
-          agent_id = os.environ.get('AGENT_ID','').strip()
-          repo = f"{os.environ['OWNER']}/{os.environ['REPO']}"
-          
-          issue_number = int(os.environ['ISSUE_NUMBER'])
-          comment_id = int(os.environ['COMMENT_ID'])
-          comment_url = os.environ['COMMENT_URL']
-          requested_by = os.environ['REQUESTED_BY']
-          requested_at = os.environ['REQUESTED_AT']
-          head_sha = os.environ.get('HEAD_SHA','')
-          base_sha = os.environ.get('BASE_SHA','')
-          
-          trace_id = 'trc_' + secrets.token_hex(12)
-          run_id = 'run_' + secrets.token_hex(12)
-          
-          args_hash = hashlib.sha256(args.encode()).hexdigest()
-          idempotency_key = f"{repo}#{issue_number}#{head_sha}#{command}#{args_hash}#{requested_by}#{comment_id}"
-          
-          payload = {
-            'schemaVersion': 1,
-            # Actions cannot access X-GitHub-Delivery; use a deterministic surrogate for v1.
-            'deliveryId': str(comment_id),
-            'traceId': trace_id,
-            'runId': run_id,
-            'command': command,
-            'args': args,
-            'agentId': agent_id,
-            'repo': repo,
-            'installationId': int(os.environ['INSTALLATION_ID']),
-            'issueNumber': issue_number,
-            'prNumber': issue_number,
-            'commentId': comment_id,
-            'commentUrl': comment_url,
-            'headSha': head_sha,
-            'baseSha': base_sha,
-            'requestedBy': requested_by,
-            'requestedAt': requested_at,
-            'authorAssociation': os.environ.get('AUTHOR_ASSOCIATION',''),
-            'idempotencyKey': idempotency_key,
-          }
-          
-          body = json.dumps(payload, separators=(',',':')).encode()
-          nonce = secrets.token_hex(16)
-          ts = int(time.time()*1000)
-          mac = hmac.new(secret, body, hashlib.sha256).hexdigest()
-          
-          req = urllib.request.Request(url, data=body, method='POST')
-          req.add_header('Content-Type', 'application/json')
-          req.add_header('User-Agent', 'curl/8.0')
-          req.add_header('X-Hub-Signature-256', 'sha256=' + mac)
-          req.add_header('X-QZAI-Timestamp', str(ts))
-          req.add_header('X-QZAI-Nonce', nonce)
+import json, os, time, secrets, hmac, hashlib, urllib.request
+
+hook_base = os.environ['HOOK_BASE_URL'].rstrip('/')
+url = hook_base + '/hooks/slash-bridge-v1'
+secret = os.environ['HOOK_SECRET'].encode()
+
+command = os.environ['COMMAND']
+args = os.environ.get('ARGS','')
+agent_id = os.environ.get('AGENT_ID','').strip()
+repo = f"{os.environ['OWNER']}/{os.environ['REPO']}"
+
+issue_number = int(os.environ['ISSUE_NUMBER'])
+comment_id = int(os.environ['COMMENT_ID'])
+comment_url = os.environ['COMMENT_URL']
+requested_by = os.environ['REQUESTED_BY']
+requested_at = os.environ['REQUESTED_AT']
+head_sha = os.environ.get('HEAD_SHA','')
+base_sha = os.environ.get('BASE_SHA','')
+
+trace_id = 'trc_' + secrets.token_hex(12)
+run_id = 'run_' + secrets.token_hex(12)
+
+args_hash = hashlib.sha256(args.encode()).hexdigest()
+idempotency_key = f"{repo}#{issue_number}#{head_sha}#{command}#{args_hash}#{requested_by}#{comment_id}"
+
+payload = {
+  'schemaVersion': 1,
+  # Actions cannot access X-GitHub-Delivery; use a deterministic surrogate for v1.
+  'deliveryId': str(comment_id),
+  'traceId': trace_id,
+  'runId': run_id,
+  'command': command,
+  'args': args,
+  'agentId': agent_id,
+  'repo': repo,
+  'installationId': int(os.environ['INSTALLATION_ID']),
+  'issueNumber': issue_number,
+  'prNumber': issue_number,
+  'commentId': comment_id,
+  'commentUrl': comment_url,
+  'headSha': head_sha,
+  'baseSha': base_sha,
+  'requestedBy': requested_by,
+  'requestedAt': requested_at,
+  'authorAssociation': os.environ.get('AUTHOR_ASSOCIATION',''),
+  'idempotencyKey': idempotency_key,
+}
+
+body = json.dumps(payload, separators=(',',':')).encode()
+nonce = secrets.token_hex(16)
+ts = int(time.time()*1000)
+mac = hmac.new(secret, body, hashlib.sha256).hexdigest()
+
+req = urllib.request.Request(url, data=body, method='POST')
+req.add_header('Content-Type', 'application/json')
+req.add_header('User-Agent', 'curl/8.0')
+req.add_header('X-Hub-Signature-256', 'sha256=' + mac)
+req.add_header('X-QZAI-Timestamp', str(ts))
+req.add_header('X-QZAI-Nonce', nonce)
           
           # HTTP timeout+retry (fail-closed)
           last_err = None

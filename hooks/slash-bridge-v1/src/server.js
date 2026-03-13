@@ -238,13 +238,16 @@ async function main() {
         return json(res, 400, { ok: false, ...ack });
       }
 
-      // Resolve GitHub token per request (mint installation token if configured).
-      const ghToken = await getGitHubTokenFromEnv();
 
       if (!allowedRepos.has(repoFull)) {
         const ack = { accepted: false, ...ackBase, ...reason('REPO_NOT_ALLOWED', `repo not allowed: ${repoFull}`) };
         await db.run('INSERT INTO deliveries(delivery_id, created_at_ms, ack_json) VALUES(?,?,?)', deliveryId, now, JSON.stringify(ack));
-        await withRetry(() => createIssueComment({ token: ghToken, owner, repo, issueNumber, body: formatAck(ack, payload) }));
+        try {
+          const ghToken = await getGitHubTokenFromEnv();
+          await withRetry(() => createIssueComment({ token: ghToken, owner, repo, issueNumber, body: formatAck(ack, payload) }));
+        } catch {
+          // Fail-closed: cannot write back without GH auth.
+        }
         return json(res, 200, { ok: true, ack });
       }
 
@@ -257,15 +260,32 @@ async function main() {
         if (!Number.isFinite(instId) || instId <= 0) {
           const ack = { accepted: false, ...ackBase, ...reason('ARGS_INVALID', 'invalid installationId') };
           await db.run('INSERT INTO deliveries(delivery_id, created_at_ms, ack_json) VALUES(?,?,?)', deliveryId, now, JSON.stringify(ack));
-          await withRetry(() => createIssueComment({ token: ghToken, owner, repo, issueNumber, body: formatAck(ack, payload) }));
+          try {
+            const ghToken = await getGitHubTokenFromEnv();
+            await withRetry(() => createIssueComment({ token: ghToken, owner, repo, issueNumber, body: formatAck(ack, payload) }));
+          } catch {}
           return json(res, 200, { ok: true, ack });
         }
         if (instId !== expectedInst) {
           const ack = { accepted: false, ...ackBase, ...reason('INSTALLATION_MISMATCH', `installation mismatch: expected ${expectedInst} got ${instId}`) };
           await db.run('INSERT INTO deliveries(delivery_id, created_at_ms, ack_json) VALUES(?,?,?)', deliveryId, now, JSON.stringify(ack));
-          await withRetry(() => createIssueComment({ token: ghToken, owner, repo, issueNumber, body: formatAck(ack, payload) }));
+          try {
+            const ghToken = await getGitHubTokenFromEnv();
+            await withRetry(() => createIssueComment({ token: ghToken, owner, repo, issueNumber, body: formatAck(ack, payload) }));
+          } catch {}
           return json(res, 200, { ok: true, ack });
         }
+      }
+
+      // Resolve GitHub token per request (mint installation token if configured).
+      // IMPORTANT: use the validated installationId (if present) to avoid repo/installation mismatch.
+      let ghToken;
+      try {
+        ghToken = await getGitHubTokenFromEnv({ installationId: expectedInst ?? instId });
+      } catch (e) {
+        const ack = { accepted: false, ...ackBase, ...reason('GH_AUTH_FAILED', String(e?.message || e)) };
+        await db.run('INSERT INTO deliveries(delivery_id, created_at_ms, ack_json) VALUES(?,?,?)', deliveryId, now, JSON.stringify(ack));
+        return json(res, 200, { ok: true, ack });
       }
 
       if (!isAuthorAllowed(payload.authorAssociation, { extraAllow: authorAssocExtra })) {
