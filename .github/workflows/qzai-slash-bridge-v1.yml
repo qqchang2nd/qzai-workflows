@@ -23,7 +23,7 @@ jobs:
         id: parse
         uses: actions/github-script@v7
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ github.token }}
           script: |
             const body = String(context.payload.comment?.body || '');
             const firstLine = (body.split(/\r?\n/)[0] || '').trim();
@@ -36,20 +36,25 @@ jobs:
             }
             const agentId = String(kv.agentId || '').trim();
             core.setOutput('agentId', agentId);
+            core.info(`firstLine=${JSON.stringify(firstLine)}`);
             if (!m) {
               core.setOutput('skip', '1');
+              core.info('skip=1 (not /qzai ...)');
               return;
             }
             core.setOutput('skip', '0');
-            core.setOutput('command', String(m[1] || '').trim());
-            core.setOutput('args', String(m[2] || '').trim());
+            const command = String(m[1] || '').trim();
+            const args = String(m[2] || '').trim();
+            core.setOutput('command', command);
+            core.setOutput('args', args);
+            core.info(`skip=0 command=${command} args=${JSON.stringify(args)} agentId=${agentId}`);
 
       - name: Gather context (PR head/base sha + installationId + authorAssociation)
         if: steps.parse.outputs.skip != '1'
         id: ctx
         uses: actions/github-script@v7
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ github.token }}
           script: |
             const owner = context.repo.owner;
             const repo = context.repo.repo;
@@ -187,7 +192,7 @@ req.add_header('X-QZAI-Nonce', nonce)
         if: failure() && steps.parse.outputs.skip != '1'
         uses: actions/github-script@v7
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ github.token }}
           script: |
             const owner = context.repo.owner;
             const repo = context.repo.repo;
