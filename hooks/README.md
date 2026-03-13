@@ -115,11 +115,12 @@ curl -sS -X POST 'http://127.0.0.1:8787/hooks/slash-bridge-v1' \
 
 | command | 默认 agentId | use case（1 句话） |
 |---|---:|---|
-| `plan` | `luxiaofeng` | 生成/更新计划、拆解任务、输出执行清单（偏规划类）。 |
+| `plan-pr` | `luxiaofeng` | 生成/更新计划、拆解任务、输出执行清单（偏规划类）。 |
 | `review` | `afei` | 对 PR/改动做 review 建议、指出风险与改进点（偏评审类）。 |
 | `security` | `jingwuming` | 进行安全相关检查与建议（偏安全类）。 |
 
 > v1：用户在评论里指定 agentId 默认不支持（由 hook 侧路由表决定）。
+> 兼容：短期保留 `plan` 作为 `plan-pr` 的 alias（文档以 `plan-pr` 为准）。
 
 ### 输出（ACK / Final）
 
@@ -132,7 +133,7 @@ curl -sS -X POST 'http://127.0.0.1:8787/hooks/slash-bridge-v1' \
 
 ### 最小 E2E checklist（命令覆盖）
 
-- [ ] `/qzai plan` -> ACK + Final（agentId= luxiaofeng）
+- [ ] `/qzai plan-pr` -> ACK + Final（agentId= luxiaofeng）
 - [ ] `/qzai review` -> ACK + Final（agentId= afei）
 - [ ] `/qzai security` -> ACK + Final（agentId= jingwuming）
 - [ ] `/qzai unknown` -> ACK 拒绝（ROUTE_NOT_FOUND），无 Final
@@ -146,7 +147,7 @@ curl -sS -X POST 'http://127.0.0.1:8787/hooks/slash-bridge-v1' \
 
 | 用户输入（GitHub comment 首行） | Actions 解析 token | hook payload.command | hook 路由结果 |
 |---|---|---|---|
-| `/qzai plan` | `plan` | `plan` | `luxiaofeng` |
+| `/qzai plan-pr` | `plan` | `plan-pr` | `luxiaofeng` |
 | `/qzai review` | `review` | `review` | `afei` |
 | `/qzai security` | `security` | `security` | `jingwuming` |
 | `/qzai plan-pr` | `plan-pr` | `plan-pr` | fail-closed `ROUTE_NOT_FOUND`（v1 不实现） |
