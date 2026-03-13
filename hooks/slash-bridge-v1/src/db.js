@@ -37,12 +37,10 @@ export async function openDb(dbPath) {
     );
 
     CREATE TABLE IF NOT EXISTS dead_letters (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      run_id TEXT,
-      trace_id TEXT,
-      stage TEXT,
-      error TEXT,
-      created_at_ms INTEGER NOT NULL
+      id TEXT PRIMARY KEY,
+      created_at_ms INTEGER NOT NULL,
+      kind TEXT NOT NULL,
+      payload_json TEXT NOT NULL
     );
 
 
