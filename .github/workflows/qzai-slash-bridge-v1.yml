@@ -116,7 +116,7 @@ jobs:
           
           command = os.environ['COMMAND']
           args = os.environ.get('ARGS','')
-agent_id = os.environ.get('AGENT_ID','').strip()
+          agent_id = os.environ.get('AGENT_ID','').strip()
           repo = f"{os.environ['OWNER']}/{os.environ['REPO']}"
           
           issue_number = int(os.environ['ISSUE_NUMBER'])
