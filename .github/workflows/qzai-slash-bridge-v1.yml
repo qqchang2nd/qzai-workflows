@@ -1,0 +1,195 @@
+name: QZAI Slash Bridge v1 (Actions -> Hook)
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  issues: write
+  pull-requests: read
+  checks: write
+  contents: read
+
+concurrency:
+  group: qzai-slash-bridge-v1-${{ github.repository }}-${{ github.event.comment.id || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  dispatch-to-hook:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Parse /qzai command (first line)
+        id: parse
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const body = String(context.payload.comment?.body || '');
+            const firstLine = (body.split(/\r?\n/)[0] || '').trim();
+            const m = firstLine.match(/^\/qzai\s+([a-zA-Z0-9_-]+)(?:\s+(.*))?$/);
+            if (!m) {
+              core.setOutput('skip', '1');
+              return;
+            }
+            core.setOutput('skip', '0');
+            core.setOutput('command', String(m[1] || '').trim());
+            core.setOutput('args', String(m[2] || '').trim());
+
+      - name: Gather context (PR head/base sha)
+        if: steps.parse.outputs.skip != '1'
+        id: ctx
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issue = context.payload.issue;
+            const isPr = Boolean(issue.pull_request);
+
+            let headSha = '';
+            let baseSha = '';
+            if (isPr) {
+              const pr = await github.rest.pulls.get({ owner, repo, pull_number: issue.number });
+              headSha = String(pr.data.head?.sha || '');
+              baseSha = String(pr.data.base?.sha || '');
+            }
+            core.setOutput('isPr', isPr ? '1' : '0');
+            core.setOutput('headSha', headSha);
+            core.setOutput('baseSha', baseSha);
+
+      - name: POST to hook (HMAC + nonce + timestamp)
+        if: steps.parse.outputs.skip != '1'
+        id: post
+        env:
+          HOOK_BASE_URL: ${{ secrets.OPENCLAW_GATEWAY_URL || 'https://bridge.tendou.eu.org' }}
+          HOOK_SECRET: ${{ secrets.SLASH_BRIDGE_HOOK_SECRET }}
+          COMMAND: ${{ steps.parse.outputs.command }}
+          ARGS: ${{ steps.parse.outputs.args }}
+          OWNER: ${{ github.repository_owner }}
+          REPO: ${{ github.event.repository.name }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+          COMMENT_URL: ${{ github.event.comment.html_url }}
+          REQUESTED_BY: ${{ github.actor }}
+          REQUESTED_AT: ${{ github.event.comment.created_at }}
+          HEAD_SHA: ${{ steps.ctx.outputs.headSha }}
+          BASE_SHA: ${{ steps.ctx.outputs.baseSha }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${HOOK_SECRET:-}" ]]; then
+            echo "HOOK_SECRET missing" >&2
+            exit 2
+          fi
+
+          python3 - <<'PY'
+import json, os, time, secrets, hmac, hashlib, urllib.request
+
+hook_base = os.environ['HOOK_BASE_URL'].rstrip('/')
+url = hook_base + '/hooks/slash-bridge-v1'
+secret = os.environ['HOOK_SECRET'].encode()
+
+command = os.environ['COMMAND']
+args = os.environ.get('ARGS','')
+repo = f"{os.environ['OWNER']}/{os.environ['REPO']}"
+
+issue_number = int(os.environ['ISSUE_NUMBER'])
+comment_id = int(os.environ['COMMENT_ID'])
+comment_url = os.environ['COMMENT_URL']
+requested_by = os.environ['REQUESTED_BY']
+requested_at = os.environ['REQUESTED_AT']
+head_sha = os.environ.get('HEAD_SHA','')
+base_sha = os.environ.get('BASE_SHA','')
+
+trace_id = 'trc_' + secrets.token_hex(12)
+run_id = 'run_' + secrets.token_hex(12)
+
+args_hash = hashlib.sha256(args.encode()).hexdigest()
+idempotency_key = f"{repo}#{issue_number}#{head_sha}#{command}#{args_hash}#{requested_by}#{comment_id}"
+
+payload = {
+  'schemaVersion': 1,
+  # Actions cannot access X-GitHub-Delivery; use a deterministic surrogate for v1.
+  'deliveryId': f"actions-{os.environ.get('GITHUB_RUN_ID','')}" ,
+  'traceId': trace_id,
+  'runId': run_id,
+  'command': command,
+  'args': args,
+  'repo': repo,
+  'installationId': 0,
+  'issueNumber': issue_number,
+  'prNumber': issue_number,
+  'commentId': comment_id,
+  'commentUrl': comment_url,
+  'headSha': head_sha,
+  'baseSha': base_sha,
+  'requestedBy': requested_by,
+  'requestedAt': requested_at,
+  'idempotencyKey': idempotency_key,
+}
+
+body = json.dumps(payload, separators=(',',':')).encode()
+nonce = secrets.token_hex(16)
+ts = int(time.time()*1000)
+mac = hmac.new(secret, body, hashlib.sha256).hexdigest()
+
+req = urllib.request.Request(url, data=body, method='POST')
+req.add_header('Content-Type', 'application/json')
+req.add_header('X-Hub-Signature-256', 'sha256=' + mac)
+req.add_header('X-QZAI-Timestamp', str(ts))
+req.add_header('X-QZAI-Nonce', nonce)
+
+# HTTP timeout+retry (fail-closed)
+last_err = None
+for i in range(3):
+  try:
+    with urllib.request.urlopen(req, timeout=8) as resp:
+      out = resp.read().decode('utf-8')
+      print(out)
+      break
+  except Exception as e:
+    last_err = e
+    time.sleep(0.8*(2**i))
+else:
+  raise SystemExit(f"HOOK_POST_FAILED: {last_err}")
+PY
+
+      - name: Write failure comment/check-run (fail-closed)
+        if: failure() && steps.parse.outputs.skip != '1'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issueNumber = context.payload.issue.number;
+            const cmd = '${{ steps.parse.outputs.command }}';
+            const hookBase = '${{ secrets.OPENCLAW_GATEWAY_URL || 'https://bridge.tendou.eu.org' }}';
+
+            const body = [
+              '### ❌ QZAI Slash Bridge v1 (dispatch failed)',
+              '',
+              `- command: \`${cmd}\``,
+              `- hook: ${hookBase}/hooks/slash-bridge-v1`,
+              `- run: ${context.runId}`,
+              `- workflow: ${context.workflow}`,
+              '',
+              '请检查：tunnel/网络、HOOK_SECRET 配置、hook server 是否运行。'
+            ].join('\n');
+
+            await github.rest.issues.createComment({ owner, repo, issue_number: issueNumber, body });
+
+            const headSha = '${{ steps.ctx.outputs.headSha }}';
+            if (headSha) {
+              await github.rest.checks.create({
+                owner,
+                repo,
+                name: 'slash-bridge-v1/dispatch',
+                head_sha: headSha,
+                status: 'completed',
+                conclusion: 'failure',
+                output: { title: 'Slash Bridge v1 Dispatch Failed', summary: body }
+              });
+            }
