@@ -146,13 +146,25 @@ curl -sS -X POST 'http://127.0.0.1:8787/hooks/slash-bridge-v1' \
 
 | 用户输入（GitHub comment 首行） | Actions 解析 token | hook payload.command | hook 路由结果 |
 |---|---|---|---|
-| `/qzai plan-pr` | `plan` | `plan-pr` | `luxiaofeng` |
+| `/qzai plan-pr` | `plan-pr` | `plan-pr` | `luxiaofeng` |
 | `/qzai review` | `review` | `review` | `afei` |
 | `/qzai security` | `security` | `security` | `jingwuming` |
-| `/qzai plan-pr` | `plan-pr` | `plan-pr` | fail-closed `ROUTE_NOT_FOUND`（v1 不实现） |
+| `/qzai plan-pr` | `plan-pr` | `plan-pr` | `luxiaofeng` |
 | `/qzai impl-pr` | `impl-pr` | `impl-pr` | fail-closed `ROUTE_NOT_FOUND`（v1 不实现） |
 | `/qzai followup` | `followup` | `followup` | fail-closed `ROUTE_NOT_FOUND`（v1 不实现） |
 
 建议 roadmap（不在本 PR 扩 scope）：
 - v1.1：补齐 `plan-pr/impl-pr/followup` 的 command 解析与 payload schema（包含 plan url / pr context），hook 侧路由到对应 agent；仍由 agent 执行并回写。
 - v2：统一命令命名与 spec（例如将 `plan-pr/impl-pr` 作为 `plan/impl` 的 mode 参数），并完善 args schema / policy。
+
+
+### deliveryId 语义（v1）
+
+- v1 由于 Actions 无法获取 `X-GitHub-Delivery`，因此 **deliveryId 使用 commentId 作为 surrogate**（即每条评论唯一）。
+- 后续版本可切换为真实 delivery header，并保留向后兼容策略。
+
+
+### v1 scope（PR-only）
+
+- v1 仅支持 PR conversation（issue_comment on PR）。
+- 若在 Issue 下触发 `/qzai <cmd>`，Actions 侧会 fail-closed 回贴 `CONTEXT_NOT_SUPPORTED`，不会向 hook 发送请求。

@@ -67,6 +67,12 @@ jobs:
             const authorAssociation = String(context.payload.comment?.author_association || '');
 
             core.setOutput('isPr', isPr ? '1' : '0');
+
+            if (!isPr) {
+              core.setFailed('Fail-closed: CONTEXT_NOT_SUPPORTED (v1 is PR-only)');
+              return;
+            }
+
             core.setOutput('headSha', headSha);
             core.setOutput('baseSha', baseSha);
             core.setOutput('installationId', String(installationId));
