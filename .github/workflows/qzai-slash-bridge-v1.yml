@@ -141,6 +141,7 @@ agent_id = os.environ.get('AGENT_ID','').strip()
             'runId': run_id,
             'command': command,
             'args': args,
+            'agentId': agent_id,
             'repo': repo,
             'installationId': int(os.environ['INSTALLATION_ID']),
             'issueNumber': issue_number,
