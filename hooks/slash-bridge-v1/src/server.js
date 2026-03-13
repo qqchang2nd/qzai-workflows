@@ -4,6 +4,7 @@ import { URL } from 'node:url';
 import { openDb, cleanupExpired } from './db.js';
 import { computeHmacSha256Hex, timingSafeEqualHex, randomId, sha256Hex } from './crypto.js';
 import { createIssueComment, updateIssueComment, createCheckRun, withRetry } from './github.js';
+import { getGitHubTokenFromEnv } from './token.js';
 
 const DEFAULT_PORT = 8787;
 const MAX_BODY_BYTES = 1024 * 1024; // 1MB
@@ -107,11 +108,10 @@ async function main() {
     process.exit(1);
   }
 
-  const ghToken = process.env.GITHUB_TOKEN || '';
-  if (!ghToken) {
-    console.error('[slash-bridge-v1] Missing env GITHUB_TOKEN (MUST be GitHub App installation token; do NOT use PAT)');
-    process.exit(1);
-  }
+  // GitHub auth is resolved per-request.
+  // - Prefer GitHub App installation tokens minted from appId/key/installationId.
+  // - Allow direct GITHUB_TOKEN for local debugging.
+  // Fail-closed happens inside getGitHubTokenFromEnv().
 
   const allowedRepos = parseAllowedRepos(process.env.SLASH_BRIDGE_ALLOWED_REPOS || '');
   if (allowedRepos.size == 0) {
@@ -238,10 +238,16 @@ async function main() {
         return json(res, 400, { ok: false, ...ack });
       }
 
+
       if (!allowedRepos.has(repoFull)) {
         const ack = { accepted: false, ...ackBase, ...reason('REPO_NOT_ALLOWED', `repo not allowed: ${repoFull}`) };
         await db.run('INSERT INTO deliveries(delivery_id, created_at_ms, ack_json) VALUES(?,?,?)', deliveryId, now, JSON.stringify(ack));
-        await withRetry(() => createIssueComment({ token: ghToken, owner, repo, issueNumber, body: formatAck(ack, payload) }));
+        try {
+          const ghToken = await getGitHubTokenFromEnv();
+          await withRetry(() => createIssueComment({ token: ghToken, owner, repo, issueNumber, body: formatAck(ack, payload) }));
+        } catch {
+          // Fail-closed: cannot write back without GH auth.
+        }
         return json(res, 200, { ok: true, ack });
       }
 
@@ -254,15 +260,32 @@ async function main() {
         if (!Number.isFinite(instId) || instId <= 0) {
           const ack = { accepted: false, ...ackBase, ...reason('ARGS_INVALID', 'invalid installationId') };
           await db.run('INSERT INTO deliveries(delivery_id, created_at_ms, ack_json) VALUES(?,?,?)', deliveryId, now, JSON.stringify(ack));
-          await withRetry(() => createIssueComment({ token: ghToken, owner, repo, issueNumber, body: formatAck(ack, payload) }));
+          try {
+            const ghToken = await getGitHubTokenFromEnv();
+            await withRetry(() => createIssueComment({ token: ghToken, owner, repo, issueNumber, body: formatAck(ack, payload) }));
+          } catch {}
           return json(res, 200, { ok: true, ack });
         }
         if (instId !== expectedInst) {
           const ack = { accepted: false, ...ackBase, ...reason('INSTALLATION_MISMATCH', `installation mismatch: expected ${expectedInst} got ${instId}`) };
           await db.run('INSERT INTO deliveries(delivery_id, created_at_ms, ack_json) VALUES(?,?,?)', deliveryId, now, JSON.stringify(ack));
-          await withRetry(() => createIssueComment({ token: ghToken, owner, repo, issueNumber, body: formatAck(ack, payload) }));
+          try {
+            const ghToken = await getGitHubTokenFromEnv();
+            await withRetry(() => createIssueComment({ token: ghToken, owner, repo, issueNumber, body: formatAck(ack, payload) }));
+          } catch {}
           return json(res, 200, { ok: true, ack });
         }
+      }
+
+      // Resolve GitHub token per request (mint installation token if configured).
+      // IMPORTANT: use the validated installationId (if present) to avoid repo/installation mismatch.
+      let ghToken;
+      try {
+        ghToken = await getGitHubTokenFromEnv({ installationId: expectedInst ?? instId });
+      } catch (e) {
+        const ack = { accepted: false, ...ackBase, ...reason('GH_AUTH_FAILED', String(e?.message || e)) };
+        await db.run('INSERT INTO deliveries(delivery_id, created_at_ms, ack_json) VALUES(?,?,?)', deliveryId, now, JSON.stringify(ack));
+        return json(res, 200, { ok: true, ack });
       }
 
       if (!isAuthorAllowed(payload.authorAssociation, { extraAllow: authorAssocExtra })) {
