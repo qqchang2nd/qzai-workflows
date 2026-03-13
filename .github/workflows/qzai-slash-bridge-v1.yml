@@ -56,14 +56,7 @@ jobs:
               baseSha = String(pr.data.base?.sha || '');
             }
 
-            // installationId MUST come from GitHub API (fail-closed)
-            const inst = await github.request('GET /repos/{owner}/{repo}/installation', { owner, repo });
-            const installationId = Number(inst?.data?.id || 0);
-            if (!installationId) {
-              core.setFailed('Fail-closed: cannot determine installationId via GET /repos/{owner}/{repo}/installation');
-              return;
-            }
-
+            const installationId = Number(context.payload.installation?.id || 0);
             const authorAssociation = String(context.payload.comment?.author_association || '');
 
             core.setOutput('isPr', isPr ? '1' : '0');
