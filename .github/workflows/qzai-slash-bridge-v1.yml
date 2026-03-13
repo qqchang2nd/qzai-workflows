@@ -76,6 +76,8 @@ jobs:
           REQUESTED_AT: ${{ github.event.comment.created_at }}
           HEAD_SHA: ${{ steps.ctx.outputs.headSha }}
           BASE_SHA: ${{ steps.ctx.outputs.baseSha }}
+          INSTALLATION_ID: ${{ steps.ctx.outputs.installationId }}
+          AUTHOR_ASSOCIATION: ${{ steps.ctx.outputs.authorAssociation }}
         run: |
           set -euo pipefail
 
@@ -112,13 +114,13 @@ idempotency_key = f"{repo}#{issue_number}#{head_sha}#{command}#{args_hash}#{requ
 payload = {
   'schemaVersion': 1,
   # Actions cannot access X-GitHub-Delivery; use a deterministic surrogate for v1.
-  'deliveryId': f"actions-{os.environ.get('GITHUB_RUN_ID','')}" ,
+  'deliveryId': str(comment_id),
   'traceId': trace_id,
   'runId': run_id,
   'command': command,
   'args': args,
   'repo': repo,
-  'installationId': 0,
+  'installationId': int(os.environ['INSTALLATION_ID']),
   'issueNumber': issue_number,
   'prNumber': issue_number,
   'commentId': comment_id,
@@ -127,6 +129,7 @@ payload = {
   'baseSha': base_sha,
   'requestedBy': requested_by,
   'requestedAt': requested_at,
+  'authorAssociation': os.environ.get('AUTHOR_ASSOCIATION',''),
   'idempotencyKey': idempotency_key,
 }
 

@@ -144,7 +144,24 @@ async function main() {
       }
 
       // Validate minimal payload
-      const required = ['schemaVersion', 'command', 'repo', 'commentId', 'requestedBy', 'requestedAt', 'idempotencyKey'];
+      const required = [
+        'schemaVersion',
+        'deliveryId',
+        'command',
+        'args',
+        'repo',
+        'installationId',
+        'issueNumber',
+        'prNumber',
+        'commentId',
+        'commentUrl',
+        'headSha',
+        'baseSha',
+        'requestedBy',
+        'requestedAt',
+        'authorAssociation',
+        'idempotencyKey',
+      ];
       const missing = required.filter((k) => payload[k] === undefined || payload[k] === null || payload[k] === '');
       if (missing.length) {
         return json(res, 400, { ok: false, ...ackBase, ...reason('ARGS_INVALID', `missing required fields: ${missing.join(', ')}`) });
@@ -160,6 +177,51 @@ async function main() {
         return json(res, 400, { ok: false, ...ackBase, ...reason('ARGS_INVALID', 'missing issueNumber/prNumber') });
       }
 
+
+
+      const repoFull = String(payload.repo);
+      // Repo / installation allowlist (fail-closed)
+      if (!allowedRepos.has(repoFull)) {
+        const ack = { accepted: false, ...ackBase, ...reason('REPO_NOT_ALLOWED', `repo not allowed: ${repoFull}`) };
+        await withRetry(() => createIssueComment({ token: ghToken, owner, repo, issueNumber, body: formatAck(ack, payload) }));
+        await db.run('INSERT OR REPLACE INTO deliveries(delivery_id, created_at_ms, ack_json) VALUES(?,?,?)', payload.deliveryId, now, JSON.stringify(ack));
+        return json(res, 200, { ok: true, ack });
+      }
+      const expectedInst = allowedRepos.get(repoFull);
+      const instId = Number(payload.installationId);
+      if (expectedInst && instId !== expectedInst) {
+        const ack = { accepted: false, ...ackBase, ...reason('INSTALLATION_MISMATCH', `installation mismatch: expected ${expectedInst} got ${instId}`) };
+        await withRetry(() => createIssueComment({ token: ghToken, owner, repo, issueNumber, body: formatAck(ack, payload) }));
+        await db.run('INSERT OR REPLACE INTO deliveries(delivery_id, created_at_ms, ack_json) VALUES(?,?,?)', payload.deliveryId, now, JSON.stringify(ack));
+        return json(res, 200, { ok: true, ack });
+      }
+
+      // Author policy (fail-closed)
+      if (!isAuthorAllowed(payload.authorAssociation)) {
+        const ack = { accepted: false, ...ackBase, ...reason('AUTHOR_NOT_ALLOWED', `author_association=${payload.authorAssociation}`) };
+        await withRetry(() => createIssueComment({ token: ghToken, owner, repo, issueNumber, body: formatAck(ack, payload) }));
+        await db.run('INSERT OR REPLACE INTO deliveries(delivery_id, created_at_ms, ack_json) VALUES(?,?,?)', payload.deliveryId, now, JSON.stringify(ack));
+        return json(res, 200, { ok: true, ack });
+      }
+
+      // Rate limit (fail-closed): key = repo + actor + command
+      const rlKey = `${repoFull}#${payload.requestedBy}#${payload.command}`;
+      {
+        const row = await db.get('SELECT window_start_ms, count FROM rate_limits WHERE key=?', rlKey);
+        const windowStart = row?.window_start_ms ?? now;
+        const count = row?.count ?? 0;
+        if (now - windowStart > rateLimitWindowMs) {
+          await db.run('INSERT OR REPLACE INTO rate_limits(key, window_start_ms, count) VALUES(?,?,?)', rlKey, now, 1);
+        } else {
+          if (count + 1 > rateLimitMax) {
+            const ack = { accepted: false, ...ackBase, ...reason('RATE_LIMITED', `limit=${rateLimitMax}/${rateLimitWindowMs}ms key=${rlKey}`) };
+            await withRetry(() => createIssueComment({ token: ghToken, owner, repo, issueNumber, body: formatAck(ack, payload) }));
+            await db.run('INSERT OR REPLACE INTO deliveries(delivery_id, created_at_ms, ack_json) VALUES(?,?,?)', payload.deliveryId, now, JSON.stringify(ack));
+            return json(res, 200, { ok: true, ack });
+          }
+          await db.run('INSERT OR REPLACE INTO rate_limits(key, window_start_ms, count) VALUES(?,?,?)', rlKey, windowStart, count + 1);
+        }
+      }
       const command = String(payload.command).trim();
       const args = String(payload.args || '').trim();
 
