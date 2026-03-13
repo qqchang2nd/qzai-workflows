@@ -101,3 +101,38 @@ curl -sS -X POST 'http://127.0.0.1:8787/hooks/slash-bridge-v1' \
 - 组装 payload + `X-Hub-Signature-256` + `X-QZAI-Timestamp` + `X-QZAI-Nonce`
 - HTTP POST 到 `${OPENCLAW_GATEWAY_URL}/hooks/slash-bridge-v1`
 - 若 POST 失败：必须回写 comment +（PR 场景）check-run，包含错误原因与排查建议
+
+
+## Commands & Use cases（v1）
+
+当前 v1 hook 支持的命令集非常小（仅用于验证桥接链路）。命令由 Actions 侧解析：评论首行形如：
+
+```text
+/qzai <command> [free-form args]
+```
+
+### 支持的 commands（默认路由）
+
+| command | 默认 agentId | use case（1 句话） |
+|---|---:|---|
+| `plan` | `luxiaofeng` | 生成/更新计划、拆解任务、输出执行清单（偏规划类）。 |
+| `review` | `afei` | 对 PR/改动做 review 建议、指出风险与改进点（偏评审类）。 |
+| `security` | `jingwuming` | 进行安全相关检查与建议（偏安全类）。 |
+
+> v1：用户在评论里指定 agentId 默认不支持（由 hook 侧路由表决定）。
+
+### 输出（ACK / Final）
+
+- ACK：hook 收到并通过鉴权后，会在目标 PR/Issue 回贴一条 ACK comment，包含 `traceId/runId`、`reasonCode`（若拒绝）、以及 `nextAction`。
+- Final：异步执行完成后回贴 Final comment；同时在 `headSha` 存在时写一个 check-run `slash-bridge-v1/final`。
+
+### 不支持的命令
+
+- 若 command 不在路由表中，hook **fail-closed**：回贴 ACK（`reasonCode=ROUTE_NOT_FOUND`），不触发执行。
+
+### 最小 E2E checklist（命令覆盖）
+
+- [ ] `/qzai plan` -> ACK + Final（agentId= luxiaofeng）
+- [ ] `/qzai review` -> ACK + Final（agentId= afei）
+- [ ] `/qzai security` -> ACK + Final（agentId= jingwuming）
+- [ ] `/qzai unknown` -> ACK 拒绝（ROUTE_NOT_FOUND），无 Final
