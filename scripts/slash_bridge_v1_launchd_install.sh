@@ -5,7 +5,7 @@
 # - plist 写入 ~/Library/LaunchAgents/ai.openclaw.slash-bridge-v1.plist
 # - ProgramArguments: /bin/bash + <repo_root>/scripts/slash_bridge_v1_run.sh（绝对路径）
 # - WorkingDirectory: <repo_root>/hooks/slash-bridge-v1
-# - Stdout/Err: /tmp/openclaw/slash-bridge-v1.out.log & .err.log
+# - Stdout/Err: ~/Library/Logs/openclaw/slash-bridge-v1.out.log & .err.log
 
 set -euo pipefail
 
@@ -16,8 +16,15 @@ WORK_DIR="${REPO_ROOT}/hooks/slash-bridge-v1"
 LABEL="ai.openclaw.slash-bridge-v1"
 PLIST_PATH="${HOME}/Library/LaunchAgents/${LABEL}.plist"
 GUI_DOMAIN="gui/$(id -u)"
+LOG_DIR="${HOME}/Library/Logs/openclaw"
 
-mkdir -p /tmp/openclaw
+if [[ -L "${LOG_DIR}" ]]; then
+  echo "❌ 安装失败：${LOG_DIR} 是 symlink（存在日志重定向风险），请手动处理后重试" >&2
+  exit 1
+fi
+mkdir -p "${LOG_DIR}"
+chmod 700 "${LOG_DIR}"
+
 mkdir -p "${HOME}/Library/LaunchAgents"
 
 cat > "${PLIST_PATH}" <<EOF
@@ -41,10 +48,10 @@ cat > "${PLIST_PATH}" <<EOF
     <true/>
 
     <key>StandardOutPath</key>
-    <string>/tmp/openclaw/slash-bridge-v1.out.log</string>
+    <string>${LOG_DIR}/slash-bridge-v1.out.log</string>
 
     <key>StandardErrorPath</key>
-    <string>/tmp/openclaw/slash-bridge-v1.err.log</string>
+    <string>${LOG_DIR}/slash-bridge-v1.err.log</string>
 
     <key>WorkingDirectory</key>
     <string>${WORK_DIR}</string>
@@ -66,5 +73,5 @@ launchctl kickstart -k "${GUI_DOMAIN}/${LABEL}"
 
 echo "✅ 已安装并启动：${LABEL}"
 echo "- plist: ${PLIST_PATH}"
-echo "- stdout: /tmp/openclaw/slash-bridge-v1.out.log"
-echo "- stderr: /tmp/openclaw/slash-bridge-v1.err.log"
+echo "- stdout: ${LOG_DIR}/slash-bridge-v1.out.log"
+echo "- stderr: ${LOG_DIR}/slash-bridge-v1.err.log"
