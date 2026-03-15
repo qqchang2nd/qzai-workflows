@@ -99,6 +99,48 @@ function validateA2aEndpoint(endpoint) {
 }
 
 async function defaultA2aDispatch(agentId, task) {
+  const gatewayToken = process.env.QZAI_GATEWAY_TOKEN;
+
+  if (gatewayToken) {
+    const gatewayUrl = process.env.QZAI_GATEWAY_URL || 'http://127.0.0.1:18789/tools/invoke';
+    const resp = await fetch(gatewayUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${gatewayToken}`,
+      },
+      body: JSON.stringify({
+        tool: 'sessions_spawn',
+        args: {
+          runtime: 'subagent',
+          agentId,
+          mode: 'run',
+          task: typeof task === 'string' ? task : JSON.stringify(task)
+        }
+      }),
+      signal: AbortSignal.timeout(30_000),
+    });
+
+    if (!resp.ok) {
+      throw new Error(`Gateway dispatch failed: HTTP ${resp.status}`);
+    }
+
+    const gwResult = await resp.json();
+    let parsed = {};
+    try {
+      const raw = gwResult.result ?? gwResult;
+      parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    } catch (e) {
+      parsed = { summary: gwResult.result ?? (typeof gwResult === 'string' ? gwResult : JSON.stringify(gwResult)) };
+    }
+
+    return {
+      verdict: parsed?.verdict || 'success',
+      summary: parsed?.summary || parsed?.result || 'Task dispatched via Gateway',
+      evidenceLinks: parsed?.evidenceLinks || []
+    };
+  }
+
   const endpoint = process.env.QZAI_A2A_ENDPOINT || 'http://localhost:8788/a2a';
   const authToken = process.env.QZAI_A2A_TOKEN || '';
 
