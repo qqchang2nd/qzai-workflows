@@ -1,0 +1,65 @@
+name: QZAI Review Auto-first (on Impl PR open)
+
+on:
+  pull_request:
+    types: [opened, labeled]
+
+permissions:
+  issues: write
+  pull-requests: read
+  contents: read
+
+concurrency:
+  group: qzai-review-auto-first-${{ github.repository }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  auto-first-review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger first review on Impl PR
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const pr = context.payload.pull_request;
+            const prNumber = pr.number;
+            const eventAction = context.payload.action;
+
+            // Check for qzai:impl label
+            const labels = (pr.labels || []).map((l) => l.name);
+            if (!labels.includes('qzai:impl')) {
+              core.info(`Skip: PR #${prNumber} does not have qzai:impl label`);
+              return;
+            }
+
+            // On 'labeled' event, only trigger if the added label is qzai:impl
+            if (eventAction === 'labeled') {
+              const addedLabel = context.payload.label?.name;
+              if (addedLabel !== 'qzai:impl') {
+                core.info(`Skip: labeled event but added label is ${addedLabel}, not qzai:impl`);
+                return;
+              }
+            }
+
+            // Check if review already started (avoid duplicate trigger on labeled after opened)
+            const comments = await github.rest.issues.listComments({
+              owner, repo, issue_number: prNumber, per_page: 20,
+            });
+            const alreadyTriggered = comments.data.some(
+              (c) => c.body?.includes('/qzai review') && c.body?.includes('autoTriggered: true')
+            );
+            if (alreadyTriggered) {
+              core.info(`Skip: first review already triggered for PR #${prNumber}`);
+              return;
+            }
+
+            core.info(`Impl PR #${prNumber} → auto-triggering first /qzai review`);
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number: prNumber,
+              body: `/qzai review\nautoTriggered: true\ntriggerReason: impl-pr-opened`,
+            });

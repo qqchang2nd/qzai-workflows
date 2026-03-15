@@ -27,6 +27,7 @@ async function ghFetch(token, path, { method = 'GET', body, headers = {} } = {})
     const err = new Error(`GitHub API ${method} ${path} failed: HTTP ${resp.status}`);
     err.status = resp.status;
     err.data = data;
+    err.retryAfter = resp.headers.get('retry-after') ? Number(resp.headers.get('retry-after')) : null;
     throw err;
   }
   return data;
@@ -60,6 +61,14 @@ export async function createCheckRun({ token, owner, repo, headSha, name, title,
   });
 }
 
+// event: 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT'
+export async function submitPrReview({ token, owner, repo, pullNumber, event, body }) {
+  return ghFetch(token, `/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`, {
+    method: 'POST',
+    body: { event, body },
+  });
+}
+
 export async function withRetry(fn, { retries = 3, baseDelayMs = 800 } = {}) {
   let lastErr;
   for (let i = 0; i < retries; i++) {
@@ -67,7 +76,15 @@ export async function withRetry(fn, { retries = 3, baseDelayMs = 800 } = {}) {
       return await fn();
     } catch (e) {
       lastErr = e;
-      await sleep(baseDelayMs * Math.pow(2, i));
+      // 4xx errors (except 429 Too Many Requests) are not transient — don't retry
+      if (e.status >= 400 && e.status < 500 && e.status !== 429) {
+        throw e;
+      }
+      // 429: respect Retry-After header if present
+      const retryAfterMs = e.status === 429 && e.retryAfter
+        ? e.retryAfter * 1000
+        : baseDelayMs * Math.pow(2, i);
+      await sleep(retryAfterMs);
     }
   }
   throw lastErr;

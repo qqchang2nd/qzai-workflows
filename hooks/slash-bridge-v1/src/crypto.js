@@ -8,6 +8,7 @@ export function timingSafeEqualHex(aHex, bHex) {
   try {
     const a = Buffer.from(aHex, 'hex');
     const b = Buffer.from(bHex, 'hex');
+    if (a.length === 0 || b.length === 0) return false;
     if (a.length !== b.length) return false;
     return crypto.timingSafeEqual(a, b);
   } catch {
