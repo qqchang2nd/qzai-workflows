@@ -52,22 +52,42 @@ async function ghFetchApp(path, { method = 'GET', body, headers = {} } = {}) {
   return data;
 }
 
-let cached = null; // { token, expiresAtMs }
+// 缓存按 (agent/appId/installationId) 隔离，避免不同身份串号
+const tokenCache = new Map(); // Map<string, { token: string, expiresAtMs: number }>
 
-export async function getGitHubTokenFromEnv({ installationId } = {}) {
-  const direct = String(process.env.GITHUB_TOKEN || '').trim();
+export async function getGitHubTokenFromEnv({ installationId, agentId } = {}) {
+  // 基于 agentId 构造环境变量后缀（全大写），例如 "__LUXIAOFENG"
+  const suffix = agentId ? `__${String(agentId).toUpperCase()}` : '';
+
+  // 1) 先尝试 agent 专属 GITHUB_TOKEN（若无则 fallback 全局 GITHUB_TOKEN）
+  const direct = String((suffix && process.env[`GITHUB_TOKEN${suffix}`]) || process.env.GITHUB_TOKEN || '').trim();
   if (direct) return direct;
 
-  const appId = String(process.env.SLASH_BRIDGE_GH_APP_ID || '').trim();
-  const keyPath = String(process.env.SLASH_BRIDGE_GH_APP_PRIVATE_KEY_PATH || '').trim();
-  const inst = String(installationId || process.env.SLASH_BRIDGE_GH_APP_INSTALLATION_ID || '').trim();
+  // 2) GitHub App：先尝试 agent 专属配置（若无则 fallback 全局配置）
+  const appId = String((suffix && process.env[`SLASH_BRIDGE_GH_APP_ID${suffix}`]) || process.env.SLASH_BRIDGE_GH_APP_ID || '').trim();
+  const keyPath = String(
+    (suffix && process.env[`SLASH_BRIDGE_GH_APP_PRIVATE_KEY_PATH${suffix}`]) ||
+      process.env.SLASH_BRIDGE_GH_APP_PRIVATE_KEY_PATH ||
+      ''
+  ).trim();
+
+  const inst = String(
+    installationId ||
+      (suffix && process.env[`SLASH_BRIDGE_GH_APP_INSTALLATION_ID${suffix}`]) ||
+      process.env.SLASH_BRIDGE_GH_APP_INSTALLATION_ID ||
+      ''
+  ).trim();
 
   if (!appId || !keyPath || !inst) {
-    throw new Error('Missing GitHub auth env: set either GITHUB_TOKEN or (SLASH_BRIDGE_GH_APP_ID + SLASH_BRIDGE_GH_APP_PRIVATE_KEY_PATH + installationId)');
+    throw new Error(
+      `Missing GitHub auth env for agent ${agentId || 'global'}: set either GITHUB_TOKEN or (SLASH_BRIDGE_GH_APP_ID + SLASH_BRIDGE_GH_APP_PRIVATE_KEY_PATH + installationId)`
+    );
   }
 
+  const cacheKey = `${agentId || 'global'}:${appId}:${inst}`;
   const now = Date.now();
-  if (cached && cached.token && cached.expiresAtMs && now < cached.expiresAtMs - 60_000) {
+  const cached = tokenCache.get(cacheKey);
+  if (cached?.token && cached?.expiresAtMs && now < cached.expiresAtMs - 60_000) {
     return cached.token;
   }
 
@@ -90,6 +110,6 @@ export async function getGitHubTokenFromEnv({ installationId } = {}) {
   }
 
   const expiresAtMs = Date.parse(expiresAt);
-  cached = { token, expiresAtMs };
+  tokenCache.set(cacheKey, { token, expiresAtMs });
   return token;
 }

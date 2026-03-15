@@ -277,11 +277,18 @@ async function main() {
         }
       }
 
+      const command = String(payload.command).trim();
+      const args = String(payload.args || '').trim();
+
+      const overrideAgent = parseOverrideAgentId(payload);
+      // 先计算 routedAgent，用于选择 GitHub 身份回写（每个 agent 可有独立 App/token）
+      const routedAgent = overrideAgent && isOverrideAgentAllowed(overrideAgent) ? overrideAgent : defaultRoute(command);
+
       // Resolve GitHub token per request (mint installation token if configured).
       // IMPORTANT: use the validated installationId (if present) to avoid repo/installation mismatch.
       let ghToken;
       try {
-        ghToken = await getGitHubTokenFromEnv({ installationId: expectedInst ?? instId });
+        ghToken = await getGitHubTokenFromEnv({ installationId: expectedInst ?? instId, agentId: routedAgent || undefined });
       } catch (e) {
         const ack = { accepted: false, ...ackBase, ...reason('GH_AUTH_FAILED', String(e?.message || e)) };
         await db.run('INSERT INTO deliveries(delivery_id, created_at_ms, ack_json) VALUES(?,?,?)', deliveryId, now, JSON.stringify(ack));
@@ -313,10 +320,6 @@ async function main() {
         }
       }
 
-      const command = String(payload.command).trim();
-      const args = String(payload.args || '').trim();
-
-      const overrideAgent = parseOverrideAgentId(payload);
       if (overrideAgent && !isOverrideAgentAllowed(overrideAgent)) {
         const ack = { accepted: false, ...ackBase, ...reason('AGENT_NOT_ALLOWED', `agentId not allowed: ${overrideAgent}`) };
         await db.run('INSERT INTO deliveries(delivery_id, created_at_ms, ack_json) VALUES(?,?,?)', deliveryId, now, JSON.stringify(ack));
@@ -324,7 +327,6 @@ async function main() {
         return json(res, 200, { ok: true, ack });
       }
 
-      const routedAgent = overrideAgent || defaultRoute(command);
       if (!routedAgent) {
         const ack = { accepted: false, ...ackBase, ...reason('ROUTE_NOT_FOUND', `unknown command: ${command}`) };
         await db.run('INSERT INTO deliveries(delivery_id, created_at_ms, ack_json) VALUES(?,?,?)', deliveryId, now, JSON.stringify(ack));

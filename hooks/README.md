@@ -54,6 +54,18 @@
   - `SLASH_BRIDGE_GH_APP_PRIVATE_KEY_PATH`
   - Installation ID：优先使用请求 payload 里的 `installationId`（或你设置了 `SLASH_BRIDGE_GH_APP_INSTALLATION_ID` 作为兜底）
 
+#### 多身份（按 routed agent 切换 GitHub 身份）
+
+为了让“不同角色/agent”以各自的 GitHub 身份回写评论/检查，本服务支持 **agent 专属 env 覆盖**。
+
+命名规则：在变量名后追加 `__<AGENTID大写>`（例如 `__LUXIAOFENG`）。优先级为：
+
+1) `GITHUB_TOKEN__<AGENT>`（若存在直接用）
+2) `SLASH_BRIDGE_GH_APP_ID__<AGENT>` + `SLASH_BRIDGE_GH_APP_PRIVATE_KEY_PATH__<AGENT>` + installationId（CLI/请求/或 `SLASH_BRIDGE_GH_APP_INSTALLATION_ID__<AGENT>`）
+3) fallback 到全局 `GITHUB_TOKEN` 或全局 `SLASH_BRIDGE_GH_APP_*`
+
+示例请参考：`hooks/slash-bridge-v1/.env.example`。
+
 ## 4) v1 路由与 agentId override
 
 v1 内置最小命令集路由：
