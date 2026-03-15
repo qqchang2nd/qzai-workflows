@@ -1,0 +1,67 @@
+name: QZAI Issue Auto-close (on Impl PR merge)
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  issues: write
+  pull-requests: read
+  contents: read
+
+jobs:
+  auto-close-issue:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update linked Issue status to done after Impl PR merge
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const pr = context.payload.pull_request;
+
+            // Skip Plan PRs (they don't close issues directly)
+            const labels = (pr.labels || []).map((l) => l.name);
+            if (labels.includes('qzai:plan')) {
+              core.info('Skip: Plan PR merge does not auto-close issues');
+              return;
+            }
+
+            const body = pr.body || '';
+            // Find all issue numbers referenced via Closes/Fixes/Resolves
+            const refs = [...body.matchAll(/(?:closes?|fixes?|resolves?)\s+#(\d+)/gi)]
+              .map((m) => parseInt(m[1], 10))
+              .filter(Boolean);
+
+            if (refs.length === 0) {
+              core.info('No Closes/Fixes/Resolves references found in PR body');
+              return;
+            }
+
+            for (const issueNumber of refs) {
+              try {
+                // Add status:done label
+                const issueData = await github.rest.issues.get({ owner, repo, issue_number: issueNumber });
+                const existing = (issueData.data.labels || []).map((l) => l.name);
+                const toRemove = existing.filter((l) => l.startsWith('status:') && l !== 'status:done');
+
+                for (const label of toRemove) {
+                  try {
+                    await github.rest.issues.removeLabel({ owner, repo, issue_number: issueNumber, name: label });
+                  } catch {}
+                }
+
+                try {
+                  await github.rest.issues.addLabels({ owner, repo, issue_number: issueNumber, labels: ['status:done'] });
+                } catch (e) {
+                  if (e.status !== 422) throw e;
+                }
+
+                core.info(`Issue #${issueNumber} status updated to done`);
+              } catch (e) {
+                core.warning(`Failed to update Issue #${issueNumber}: ${e.message}`);
+              }
+            }

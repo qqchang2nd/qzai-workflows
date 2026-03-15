@@ -6,7 +6,9 @@
   "description": "QZAI slash-bridge v1 hook server (Actions -> HTTP -> Hook -> Agent -> GitHub writeback)",
   "main": "src/server.js",
   "scripts": {
-    "start": "node src/server.js"
+    "start": "node src/server.js",
+    "test": "node --test test/*.test.js",
+    "test:watch": "node --test --watch test/*.test.js"
   },
   "dependencies": {
     "sqlite": "^5.1.1",

@@ -1,0 +1,62 @@
+name: QZAI PR Link Check
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize]
+
+permissions:
+  pull-requests: write
+  checks: write
+  contents: read
+
+jobs:
+  pr-link-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify PR body contains Refs/Closes issue reference
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const pr = context.payload.pull_request;
+            const prNumber = pr.number;
+            const headSha = pr.head.sha;
+            const body = pr.body || '';
+
+            // Skip for draft PRs and Plan PRs (they don't need Closes/Refs)
+            if (pr.draft) {
+              core.info('Skip: draft PR');
+              return;
+            }
+            const labels = (pr.labels || []).map((l) => l.name);
+            if (labels.includes('qzai:plan')) {
+              core.info('Skip: Plan PR does not require Refs/Closes');
+              return;
+            }
+
+            // Check for Refs #N or Closes #N pattern
+            const hasIssueRef = /(?:closes?|fixes?|resolves?|refs?)\s+#\d+/i.test(body);
+
+            const conclusion = hasIssueRef ? 'success' : 'failure';
+            const title = hasIssueRef
+              ? 'PR contains issue reference ✅'
+              : 'PR missing issue reference ❌';
+            const summary = hasIssueRef
+              ? 'Found Closes/Refs issue reference in PR body.'
+              : 'PR body must contain `Closes #N` or `Refs #N` to link to the tracked issue. Please update the PR description.';
+
+            await github.rest.checks.create({
+              owner,
+              repo,
+              name: 'qzai/pr-link-check',
+              head_sha: headSha,
+              status: 'completed',
+              conclusion,
+              output: { title, summary },
+            });
+
+            if (!hasIssueRef) {
+              core.setFailed(summary);
+            }

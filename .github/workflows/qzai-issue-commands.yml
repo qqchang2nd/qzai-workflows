@@ -145,11 +145,11 @@ jobs:
             try {
 
               const validStatus = new Set(['todo', 'in-progress', 'blocked', 'review', 'done']);
-              const commandRegex = /\/qzai\s+(decision|next|status|ship)\b/g;
+              const commandRegex = /\/qzai\s+(decide|decision|subtask|next|status)\b/g;
 
               const blockFor = (name) => {
                 const re = new RegExp(
-                  String.raw`\/qzai\s+${name}[:：]\s*([\s\S]*?)(?=\n\s*\/qzai\s+(?:decision|next|status|ship)\b|$)`,
+                  String.raw`\/qzai\s+${name}[:：]\s*([\s\S]*?)(?=\n\s*\/qzai\s+(?:decide|decision|subtask|next|status)\b|$)`,
                   'ig'
                 );
                 return [...body.matchAll(re)]
@@ -161,9 +161,8 @@ jobs:
                 .map((m) => (m[1] || '').trim().toLowerCase())
                 .filter(Boolean);
 
-              const hasShip = /(^|\n)\s*\/qzai\s+ship\s*($|\n)/im.test(body);
-              const decisionBlocks = blockFor('decision');
-              const nextBlocks = blockFor('next');
+              const decisionBlocks = [...blockFor('decision'), ...blockFor('decide')];
+              const nextBlocks = [...blockFor('next'), ...blockFor('subtask')];
 
               if (![...body.matchAll(commandRegex)].length) {
                 core.info('No supported command found.');
@@ -317,33 +316,6 @@ jobs:
               for (const status of statusMatches) await setStatus(status);
               for (const decision of decisionBlocks) await appendDecision(decision);
               for (const nextText of nextBlocks) await createNextIssues(nextText);
-
-              if (hasShip) {
-                // 检查是否已存在由 qzai-bot[bot] 发布的 Ship Checklist
-                const comments = await github.rest.issues.listComments({ owner, repo, issue_number: issueNumber, per_page: 100 });
-                const existingShipChecklist = comments.data.some(
-                  (c) => c.user && c.user.login === botLogin && c.body && c.body.includes('### Ship Checklist')
-                );
-
-                if (existingShipChecklist) {
-                  summary.push('- ℹ️ `/qzai ship` 已发布过 Ship Checklist，跳过重复发布。');
-                } else {
-                  await setStatus('review');
-                  await github.rest.issues.createComment({
-                    owner,
-                    repo,
-                    issue_number: issueNumber,
-                    body: [
-                      '### Ship Checklist',
-                      '- [ ] 功能验收（核心流程可用）',
-                      '- [ ] 测试通过（自动化/手工）',
-                      '- [ ] 文档同步（README / USAGE）',
-                      '- [ ] 风险与回滚方案已确认',
-                    ].join('\n'),
-                  });
-                  summary.push('- ✅ 已执行 `/qzai ship`：状态改为 `status:review` 并发布验收清单');
-                }
-              }
 
               if (summary.length > 0) {
                 await github.rest.issues.createComment({

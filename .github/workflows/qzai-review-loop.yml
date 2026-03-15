@@ -1,0 +1,67 @@
+name: QZAI Review Loop (auto re-trigger on push)
+
+on:
+  pull_request:
+    types: [synchronize]
+
+permissions:
+  issues: write
+  pull-requests: write
+  contents: read
+
+concurrency:
+  group: qzai-review-loop-${{ github.repository }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  check-and-trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check review_rounds status and auto-trigger next review
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const prNumber = context.payload.pull_request.number;
+            const headSha = context.payload.pull_request.head.sha;
+
+            // Query hook server for current review_rounds status
+            const hookBase = process.env.HOOK_BASE_URL || '${{ secrets.OPENCLAW_GATEWAY_URL || 'https://bridge.tendou.eu.org' }}';
+            let reviewStatus = null;
+            try {
+              const resp = await fetch(`${hookBase}/review-status?repo=${owner}/${repo}&pr=${prNumber}`, {
+                headers: { 'Authorization': `Bearer ${{ secrets.SLASH_BRIDGE_HOOK_SECRET }}` },
+                signal: AbortSignal.timeout(5000),
+              });
+              if (resp.ok) reviewStatus = await resp.json();
+            } catch (e) {
+              core.warning(`Could not fetch review status: ${e.message}. Falling back to label check.`);
+            }
+
+            // Fallback: check PR labels for qzai:impl
+            const pr = await github.rest.pulls.get({ owner, repo, pull_number: prNumber });
+            const labels = (pr.data.labels || []).map((l) => l.name);
+            const isImplPr = labels.includes('qzai:impl');
+
+            if (!isImplPr) {
+              core.info('Skip: PR does not have qzai:impl label');
+              return;
+            }
+
+            const isPendingFix = reviewStatus?.status === 'pending_fix';
+
+            if (!isPendingFix && reviewStatus !== null) {
+              core.info(`Skip: review status is ${reviewStatus?.status}, not pending_fix`);
+              return;
+            }
+
+            // Auto-trigger next review round
+            core.info(`PR #${prNumber} push detected, triggering /qzai review (round auto-increment)`);
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number: prNumber,
+              body: `/qzai review\nautoTriggered: true\ntriggerReason: push-after-pending-fix`,
+            });

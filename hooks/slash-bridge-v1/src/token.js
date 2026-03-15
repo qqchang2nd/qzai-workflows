@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import crypto from 'node:crypto';
 
 const API = 'https://api.github.com';
@@ -26,8 +27,8 @@ function signJwt({ appId, privateKeyPem }) {
   return `${hp}.${base64url(sig)}`;
 }
 
-async function ghFetchApp(path, { method = 'GET', body, headers = {} } = {}) {
-  const resp = await fetch(`${API}${path}`, {
+async function ghFetchApp(path_, { method = 'GET', body, headers = {} } = {}) {
+  const resp = await fetch(`${API}${path_}`, {
     method,
     headers: {
       Accept: 'application/vnd.github+json',
@@ -35,7 +36,9 @@ async function ghFetchApp(path, { method = 'GET', body, headers = {} } = {}) {
       ...headers,
     },
     body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(15_000),
   });
+
   const text = await resp.text();
   let data = null;
   try {
@@ -43,55 +46,50 @@ async function ghFetchApp(path, { method = 'GET', body, headers = {} } = {}) {
   } catch {
     data = { raw: text };
   }
+
   if (!resp.ok) {
-    const err = new Error(`GitHub API ${method} ${path} failed: HTTP ${resp.status}`);
+    const err = new Error(`GitHub API ${method} ${path_} failed: HTTP ${resp.status}`);
     err.status = resp.status;
     err.data = data;
     throw err;
   }
+
   return data;
 }
 
-// 缓存按 (agent/appId/installationId) 隔离，避免不同身份串号
-const tokenCache = new Map(); // Map<string, { token: string, expiresAtMs: number }>
+// --- Private key PEM cache (per resolved path) ---
+const pemCache = new Map(); // Map<string, string>
 
-export async function getGitHubTokenFromEnv({ installationId, agentId } = {}) {
-  // 基于 agentId 构造环境变量后缀（全大写），例如 "__LUXIAOFENG"
-  const suffix = agentId ? `__${String(agentId).toUpperCase()}` : '';
+function validateAndResolvePemPath(keyPath) {
+  const raw = String(keyPath || '').trim();
+  if (!raw) return null;
 
-  // 1) 先尝试 agent 专属 GITHUB_TOKEN（若无则 fallback 全局 GITHUB_TOKEN）
-  const direct = String((suffix && process.env[`GITHUB_TOKEN${suffix}`]) || process.env.GITHUB_TOKEN || '').trim();
-  if (direct) return direct;
-
-  // 2) GitHub App：先尝试 agent 专属配置（若无则 fallback 全局配置）
-  const appId = String((suffix && process.env[`SLASH_BRIDGE_GH_APP_ID${suffix}`]) || process.env.SLASH_BRIDGE_GH_APP_ID || '').trim();
-  const keyPath = String(
-    (suffix && process.env[`SLASH_BRIDGE_GH_APP_PRIVATE_KEY_PATH${suffix}`]) ||
-      process.env.SLASH_BRIDGE_GH_APP_PRIVATE_KEY_PATH ||
-      ''
-  ).trim();
-
-  const inst = String(
-    installationId ||
-      (suffix && process.env[`SLASH_BRIDGE_GH_APP_INSTALLATION_ID${suffix}`]) ||
-      process.env.SLASH_BRIDGE_GH_APP_INSTALLATION_ID ||
-      ''
-  ).trim();
-
-  if (!appId || !keyPath || !inst) {
-    throw new Error(
-      `Missing GitHub auth env for agent ${agentId || 'global'}: set either GITHUB_TOKEN or (SLASH_BRIDGE_GH_APP_ID + SLASH_BRIDGE_GH_APP_PRIVATE_KEY_PATH + installationId)`
-    );
+  // Path traversal guard: reject paths with '..' components
+  const resolved = path.resolve(raw);
+  if (resolved !== path.normalize(resolved) || raw.includes('..')) {
+    throw new Error(`SLASH_BRIDGE_GH_APP_PRIVATE_KEY_PATH contains path traversal: ${raw}`);
   }
-
-  const cacheKey = `${agentId || 'global'}:${appId}:${inst}`;
-  const now = Date.now();
-  const cached = tokenCache.get(cacheKey);
-  if (cached?.token && cached?.expiresAtMs && now < cached.expiresAtMs - 60_000) {
-    return cached.token;
+  if (!path.isAbsolute(resolved)) {
+    throw new Error(`SLASH_BRIDGE_GH_APP_PRIVATE_KEY_PATH must be absolute: ${raw}`);
   }
+  return resolved;
+}
 
-  const privateKeyPem = fs.readFileSync(keyPath, 'utf8');
+function getPrivateKeyPemForPath(keyPath) {
+  const resolved = validateAndResolvePemPath(keyPath);
+  if (!resolved) return null;
+  if (pemCache.has(resolved)) return pemCache.get(resolved);
+  const pem = fs.readFileSync(resolved, 'utf8');
+  pemCache.set(resolved, pem);
+  return pem;
+}
+
+// --- Token cache + singleflight (per identity key) ---
+// cache key: agentKey:appId:installationId (or agentKey:GITHUB_TOKEN:direct)
+const cache = new Map(); // Map<string, { token: string, expiresAtMs: number }>
+const inflight = new Map(); // Map<string, Promise<string>>
+
+async function mintInstallationToken({ appId, privateKeyPem, inst }) {
   const jwt = signJwt({ appId, privateKeyPem });
 
   const data = await ghFetchApp(`/app/installations/${inst}/access_tokens`, {
@@ -109,7 +107,85 @@ export async function getGitHubTokenFromEnv({ installationId, agentId } = {}) {
     throw new Error('Failed to obtain installation token from GitHub');
   }
 
-  const expiresAtMs = Date.parse(expiresAt);
-  tokenCache.set(cacheKey, { token, expiresAtMs });
-  return token;
+  return { token, expiresAtMs: Date.parse(expiresAt) };
+}
+
+function suffixOf(agentId) {
+  const a = String(agentId || '').trim();
+  return a ? `__${a.toUpperCase()}` : '';
+}
+
+function pickEnv(base, suffix) {
+  if (suffix && process.env[`${base}${suffix}`]) return process.env[`${base}${suffix}`];
+  return process.env[base];
+}
+
+/**
+ * Get a GitHub token for writebacks.
+ *
+ * 支持“按 agent 身份切换”：
+ * - 专属覆盖：GITHUB_TOKEN__<AGENT> 或 SLASH_BRIDGE_GH_APP_*__<AGENT>
+ * - fallback：全局 GITHUB_TOKEN 或全局 SLASH_BRIDGE_GH_APP_*
+ *
+ * CRIT-1 note: GITHUB_TOKEN env var is supported ONLY for local single-installation
+ * debugging. It bypasses per-installation auth and MUST NOT be set in multi-tenant
+ * deployments where requests span multiple installations.
+ */
+export async function getGitHubTokenFromEnv({ installationId, agentId } = {}) {
+  const suffix = suffixOf(agentId);
+  const agentKey = suffix ? suffix.slice(2) : 'GLOBAL';
+
+  // 1) direct token
+  const direct = String(pickEnv('GITHUB_TOKEN', suffix) || '').trim();
+  if (direct) {
+    if (installationId) {
+      console.warn(
+        '[token] WARNING: GITHUB_TOKEN is set (agent=%s); ignoring installationId=%s. Do not use GITHUB_TOKEN in multi-installation deployments.',
+        agentKey,
+        installationId
+      );
+    }
+    return direct;
+  }
+
+  // 2) GitHub App
+  const appId = String(pickEnv('SLASH_BRIDGE_GH_APP_ID', suffix) || '').trim();
+  const keyPath = String(pickEnv('SLASH_BRIDGE_GH_APP_PRIVATE_KEY_PATH', suffix) || '').trim();
+
+  const inst = String(
+    installationId || pickEnv('SLASH_BRIDGE_GH_APP_INSTALLATION_ID', suffix) || process.env.SLASH_BRIDGE_GH_APP_INSTALLATION_ID || ''
+  ).trim();
+
+  const privateKeyPem = getPrivateKeyPemForPath(keyPath);
+
+  if (!appId || !privateKeyPem || !inst) {
+    throw new Error(
+      `Missing GitHub auth env (agent=${agentKey}): set either GITHUB_TOKEN or (SLASH_BRIDGE_GH_APP_ID + SLASH_BRIDGE_GH_APP_PRIVATE_KEY_PATH + installationId)`
+    );
+  }
+
+  const cacheKey = `${agentKey}:${appId}:${inst}`;
+  const now = Date.now();
+
+  const cached = cache.get(cacheKey);
+  if (cached?.token && cached?.expiresAtMs && now < cached.expiresAtMs - 60_000) {
+    return cached.token;
+  }
+
+  if (inflight.has(cacheKey)) {
+    return await inflight.get(cacheKey);
+  }
+
+  const p = (async () => {
+    const { token, expiresAtMs } = await mintInstallationToken({ appId, privateKeyPem, inst });
+    cache.set(cacheKey, { token, expiresAtMs });
+    return token;
+  })();
+
+  inflight.set(cacheKey, p);
+  try {
+    return await p;
+  } finally {
+    inflight.delete(cacheKey);
+  }
 }
