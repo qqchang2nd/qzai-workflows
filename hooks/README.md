@@ -68,10 +68,11 @@
 
 ## 4) v1 路由与 agentId override
 
-v1 内置最小命令集路由：
+v1 内置最小命令集路由（含向后兼容别名）：
 
-- `plan-pr` → `luxiaofeng`
-- `review` → `afei`
+- `plan` / `plan-pr` → `lixunhuan`
+- `implement` / `impl-pr` / `followup` / `pr-desc` → `lengyan`
+- `review` → `lixunhuan`
 - `security` → `jingwuming`
 
 支持 payload 里传 `agentId` 覆盖路由，但会做白名单校验（防止任意 agent 提权）。
