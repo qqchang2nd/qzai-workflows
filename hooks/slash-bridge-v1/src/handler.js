@@ -10,6 +10,7 @@ import { resolveAgent } from './router.js';
 import { formatAck, formatFinal } from './format.js';
 import { insertDeliveryAtomic } from './db.js';
 import * as defaultGithub from './github.js';
+import { getReviewStatus } from './review.js';
 
 function json(res, code, obj) {
   const body = JSON.stringify(obj);
@@ -25,7 +26,7 @@ function json(res, code, obj) {
  * @param {object} deps
  * @param {object} deps.db - SQLite database handle
  * @param {object} deps.config - Server configuration
- * @param {function} deps.getToken - async (installationId) => string
+ * @param {function} deps.getToken - async (installationId, agentId?) => string
  * @param {function} deps.dispatch - async (command, agentId, payload) => result
  * @param {object} [deps.githubClient] - GitHub API client (injectable for testing)
  */
@@ -41,13 +42,43 @@ export function createHandler({ db, config, getToken, dispatch, githubClient = d
   const { withRetry, createIssueComment, updateIssueComment } = githubClient;
 
   return async function handler(req, res) {
+    const u = new URL(req.url || '/', 'http://localhost');
+
     // Health check
-    if (req.method === 'GET' && new URL(req.url || '/', 'http://localhost').pathname === '/health') {
+    if (req.method === 'GET' && u.pathname === '/health') {
       return json(res, 200, { ok: true });
     }
 
+    // Review status query (for qzai-review-loop.yml)
+    if (req.method === 'GET' && u.pathname === '/review-status') {
+      const authHeader = req.headers.authorization || '';
+      const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+      if (token !== secret) {
+        return json(res, 401, { ok: false, error: 'UNAUTHORIZED' });
+      }
+
+      const repoParam = u.searchParams.get('repo');
+      const prParam = u.searchParams.get('pr');
+      if (!repoParam || !prParam) {
+        return json(res, 400, { ok: false, error: 'ARGS_INVALID', detail: 'missing repo or pr parameter' });
+      }
+
+      const [owner, repo_] = repoParam.split('/');
+      if (!owner || !repo_) {
+        return json(res, 400, { ok: false, error: 'ARGS_INVALID', detail: 'invalid repo format' });
+      }
+
+      try {
+        const reviewStatus = await getReviewStatus(db, { owner, repo: repo_, prNumber: Number(prParam) });
+        const statusValue = reviewStatus?.latest?.status || 'none';
+        return json(res, 200, { ok: true, status: statusValue, ...reviewStatus });
+      } catch (e) {
+        console.error('[slash-bridge-v1] getReviewStatus error:', e);
+        return json(res, 500, { ok: false, error: 'INTERNAL_ERROR' });
+      }
+    }
+
     // Only accept POST to /hooks/slash-bridge-v1
-    const u = new URL(req.url || '/', 'http://localhost');
     if (req.method !== 'POST' || u.pathname !== '/hooks/slash-bridge-v1') {
       return json(res, 404, { ok: false, error: 'NOT_FOUND' });
     }
@@ -133,12 +164,19 @@ export function createHandler({ db, config, getToken, dispatch, githubClient = d
     const expectedInst = allowedRepos.get(repoFull);
     const resolvedInstId = expectedInst ?? Number(payload.installationId);
 
+    // --- Agent routing ---
+    const command = String(payload.command).trim();
+    const overrideAgent = String(payload.agentId || '').trim() || null;
+    const { agentId, error: routeErr } = resolveAgent(command, overrideAgent);
+
     // --- GitHub auth ---
+    // 注意：这里优先拿 routed agent 对应的 GitHub 身份（若未配置则 fallback 全局），以确保回写使用正确的 bot 身份。
     let ghToken;
     try {
-      ghToken = await getToken(resolvedInstId);
+      ghToken = await getToken(resolvedInstId, agentId || undefined);
     } catch (e) {
-      const err = { reasonCode: 'GH_AUTH_FAILED', detail: String(e?.message || e) };
+      console.error('[slash-bridge-v1] GitHub auth failed:', e);
+      const err = { reasonCode: 'GH_AUTH_FAILED', detail: 'auth failed, see server logs' };
       await insertDeliveryAtomic(db, deliveryId, now, JSON.stringify({ accepted: false, ...ackBase, ...err }));
       return json(res, 200, { ok: true, ack: { accepted: false, ...ackBase, ...err } });
     }
@@ -158,10 +196,6 @@ export function createHandler({ db, config, getToken, dispatch, githubClient = d
         ghToken, owner, repo_, payload, 200, { withRetry, createIssueComment });
     }
 
-    // --- Agent routing ---
-    const command = String(payload.command).trim();
-    const overrideAgent = String(payload.agentId || '').trim() || null;
-    const { agentId, error: routeErr } = resolveAgent(command, overrideAgent);
     if (routeErr) {
       const err = {
         reasonCode: routeErr,

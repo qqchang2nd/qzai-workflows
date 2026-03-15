@@ -88,7 +88,7 @@ jobs:
         if: steps.parse.outputs.skip != '1'
         id: post
         env:
-          HOOK_BASE_URL: ${{ secrets.OPENCLAW_GATEWAY_URL || 'https://bridge.tendou.eu.org' }}
+          HOOK_BASE_URL: ${{ secrets.OPENCLAW_GATEWAY_URL || 'https://example.invalid' }}
           HOOK_SECRET: ${{ secrets.SLASH_BRIDGE_HOOK_SECRET }}
           COMMAND: ${{ steps.parse.outputs.command }}
           ARGS: ${{ steps.parse.outputs.args }}
@@ -140,6 +140,7 @@ idempotency_key = f"{repo}#{issue_number}#{head_sha}#{command}#{args_hash}#{requ
 
 payload = {
   'schemaVersion': 1,
+  # Actions cannot access X-GitHub-Delivery; use commentId as deterministic surrogate for v1.
   'deliveryId': str(comment_id),
   'traceId': trace_id,
   'runId': run_id,
@@ -197,7 +198,7 @@ PY
             const repo = context.repo.repo;
             const issueNumber = context.payload.issue.number;
             const cmd = '${{ steps.parse.outputs.command }}';
-            const hookBase = '${{ secrets.OPENCLAW_GATEWAY_URL || 'https://bridge.tendou.eu.org' }}';
+            const hookBase = '${{ secrets.OPENCLAW_GATEWAY_URL || 'https://example.invalid' }}';
 
             const body = [
               '### ❌ QZAI Slash Bridge v1 (dispatch failed)',

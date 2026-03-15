@@ -1,5 +1,5 @@
-
 # hook runtime
-slash-bridge-v1.sqlite
+hooks/slash-bridge-v1/*.sqlite*
 hooks/slash-bridge-v1/node_modules/
-hooks/slash-bridge-v1/package-lock.json
+hooks/slash-bridge-v1/.env
+hooks/slash-bridge-v1/*.log

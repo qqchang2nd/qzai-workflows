@@ -31,31 +31,40 @@ async function main() {
   }
 
   const authorAssocExtra = String(process.env.SLASH_BRIDGE_AUTHOR_ASSOC_EXTRA_ALLOW || '')
-    .split(',').map((x) => x.trim()).filter(Boolean);
+    .split(',')
+    .map((x) => x.trim())
+    .filter(Boolean);
 
   const rateLimitWindowMs = Number(process.env.SLASH_BRIDGE_RATE_WINDOW_MS || 60_000);
   const rateLimitMax = Number(process.env.SLASH_BRIDGE_RATE_MAX || 5);
 
   console.log('[slash-bridge-v1] config', {
-    port, dbPath,
+    port,
+    dbPath,
     allowedRepos: [...allowedRepos.entries()],
-    rateLimitWindowMs, rateLimitMax, authorAssocExtra,
+    rateLimitWindowMs,
+    rateLimitMax,
+    authorAssocExtra,
   });
 
   const db = await openDb(dbPath);
 
   // Periodic cleanup of expired nonces and commands
   const cleanupTimer = setInterval(async () => {
-    try { await cleanupExpired(db, Date.now()); } catch (e) {
+    try {
+      await cleanupExpired(db, Date.now());
+    } catch (e) {
       console.error('[slash-bridge-v1] cleanup error', e);
     }
   }, CLEANUP_INTERVAL_MS);
   cleanupTimer.unref();
 
   const config = { secret, allowedRepos, authorAssocExtra, rateLimitWindowMs, rateLimitMax };
-  const getToken = (installationId) => getGitHubTokenFromEnv({ installationId });
-  const dispatch = createDispatcher({ db, config });
 
+  // getToken: 支持按 agentId 切换 GitHub 身份（若 agentId 未配置专属身份则自动 fallback 到全局）
+  const getToken = (installationId, agentId) => getGitHubTokenFromEnv({ installationId, agentId });
+
+  const dispatch = createDispatcher({ db, config });
   const handler = createHandler({ db, config, getToken, dispatch });
 
   const server = http.createServer(async (req, res) => {
@@ -75,7 +84,9 @@ async function main() {
     console.log(`[slash-bridge-v1] ${signal} received, shutting down...`);
     clearInterval(cleanupTimer);
     server.close(async () => {
-      try { await db.close(); } catch {}
+      try {
+        await db.close();
+      } catch {}
       console.log('[slash-bridge-v1] shutdown complete');
       process.exit(0);
     });
