@@ -12,13 +12,6 @@ test('buildTask: plan command returns plan task structure', () => {
   assert.ok(task.instructions.includes('PLAN.md'));
 });
 
-test('buildTask: plan-pr alias returns same as plan', () => {
-  const payload = { owner: 'acme', repo: 'app', issueNumber: 42, issueBody: 'desc', requestedBy: 'alice' };
-  const taskPlan = buildTask('plan', payload);
-  const taskAlias = buildTask('plan-pr', payload);
-  assert.equal(taskPlan.type, taskAlias.type);
-});
-
 test('buildTask: implement command returns implement task structure', () => {
   const payload = {
     owner: 'acme', repo: 'app', issueNumber: 5,
@@ -29,13 +22,6 @@ test('buildTask: implement command returns implement task structure', () => {
   assert.equal(task.type, 'implement');
   assert.ok(task.instructions.includes('PLAN.md'));
   assert.ok(task.instructions.includes('Closes #5'));
-});
-
-test('buildTask: impl-pr alias returns same as implement', () => {
-  const payload = { owner: 'acme', repo: 'app', issueNumber: 5, requestedBy: 'bob' };
-  const a = buildTask('implement', payload);
-  const b = buildTask('impl-pr', payload);
-  assert.equal(a.type, b.type);
 });
 
 test('buildTask: review command returns code-review task structure', () => {
@@ -161,4 +147,112 @@ test('createDispatcher: passes full payload to task builder', async () => {
 
   assert.equal(capturedTask.type, 'security-review');
   assert.equal(capturedTask.context.prNumber, 99);
+});
+
+// --- defaultA2aDispatch gateway path tests ---
+// These tests exercise the real defaultA2aDispatch (no injected mock)
+// by controlling env vars and stubbing globalThis.fetch.
+
+async function withGatewayEnv(token, url, fn) {
+  const origToken = process.env.QZAI_GATEWAY_TOKEN;
+  const origUrl = process.env.QZAI_GATEWAY_URL;
+  if (token !== undefined) process.env.QZAI_GATEWAY_TOKEN = token;
+  else delete process.env.QZAI_GATEWAY_TOKEN;
+  if (url !== undefined) process.env.QZAI_GATEWAY_URL = url;
+  else delete process.env.QZAI_GATEWAY_URL;
+  try {
+    return await fn();
+  } finally {
+    if (origToken === undefined) delete process.env.QZAI_GATEWAY_TOKEN;
+    else process.env.QZAI_GATEWAY_TOKEN = origToken;
+    if (origUrl === undefined) delete process.env.QZAI_GATEWAY_URL;
+    else process.env.QZAI_GATEWAY_URL = origUrl;
+  }
+}
+
+const planPayload = { owner: 'a', repo: 'b', issueNumber: 1, issueBody: 'x', requestedBy: 'u' };
+
+test('defaultA2aDispatch (gateway): rejects external QZAI_GATEWAY_URL', async () => {
+  await withGatewayEnv('tok', 'http://evil.com/tools/invoke', async () => {
+    const dispatch = createDispatcher();
+    await assert.rejects(
+      () => dispatch('plan', 'agent1', planPayload),
+      /QZAI_GATEWAY_URL.*not in the allowed/,
+    );
+  });
+});
+
+test('defaultA2aDispatch (gateway): rejects QZAI_GATEWAY_URL with credentials', async () => {
+  await withGatewayEnv('tok', 'http://user:pass@127.0.0.1:18789/tools/invoke', async () => {
+    const dispatch = createDispatcher();
+    await assert.rejects(
+      () => dispatch('plan', 'agent1', planPayload),
+      /must not contain credentials/,
+    );
+  });
+});
+
+test('defaultA2aDispatch (gateway): non-ok response includes body text in error', async () => {
+  const origFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: false,
+    status: 503,
+    text: async () => 'service unavailable',
+  });
+  try {
+    await withGatewayEnv('tok', 'http://127.0.0.1:18789/tools/invoke', async () => {
+      const dispatch = createDispatcher();
+      await assert.rejects(
+        () => dispatch('plan', 'agent1', planPayload),
+        /Gateway dispatch failed: HTTP 503 service unavailable/,
+      );
+    });
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+});
+
+test('defaultA2aDispatch (gateway): success returns verdict:dispatched with sessionId', async () => {
+  const origFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    text: async () => JSON.stringify({ sessionId: 'sess-42', message: 'queued' }),
+  });
+  try {
+    await withGatewayEnv('tok', 'http://127.0.0.1:18789/tools/invoke', async () => {
+      const dispatch = createDispatcher();
+      const result = await dispatch('plan', 'agent1', planPayload);
+      assert.equal(result.verdict, 'dispatched');
+      assert.equal(result.sessionId, 'sess-42');
+      assert.equal(result.summary, 'queued');
+      assert.deepEqual(result.evidenceLinks, []);
+    });
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+});
+
+test('defaultA2aDispatch (A2A fallback): routes to A2A endpoint when QZAI_GATEWAY_TOKEN is absent', async () => {
+  const origFetch = globalThis.fetch;
+  const capturedUrls = [];
+  globalThis.fetch = async (url) => {
+    capturedUrls.push(url);
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ verdict: 'success', summary: 'a2a ok', evidenceLinks: [] }),
+    };
+  };
+  try {
+    await withGatewayEnv(undefined, undefined, async () => {
+      const dispatch = createDispatcher();
+      const result = await dispatch('plan', 'agent1', planPayload);
+      assert.equal(capturedUrls.length, 1);
+      assert.ok(capturedUrls[0].includes('/dispatch'), `Expected A2A /dispatch, got: ${capturedUrls[0]}`);
+      assert.equal(result.verdict, 'success');
+    });
+  } finally {
+    globalThis.fetch = origFetch;
+  }
 });
