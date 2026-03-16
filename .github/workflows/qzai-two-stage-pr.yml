@@ -187,7 +187,7 @@ jobs:
       - name: Create GitHub App installation token
         if: steps.cmd.outputs.skip != '1'
         id: app-token
-        uses: tibdex/github-app-token@v2
+        uses: tibdex/github-app-token@3065cf300ef59631528306a1bcec6a18b7752881 # v2
         with:
           app_id: ${{ steps.sel.outputs.app_id }}
           private_key: ${{ env.APP_PRIVATE_KEY }}
