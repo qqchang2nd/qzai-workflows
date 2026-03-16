@@ -162,3 +162,86 @@ test('createDispatcher: passes full payload to task builder', async () => {
   assert.equal(capturedTask.type, 'security-review');
   assert.equal(capturedTask.context.prNumber, 99);
 });
+
+// --- defaultA2aDispatch gateway path tests ---
+// These tests exercise the real defaultA2aDispatch (no injected mock)
+// by controlling env vars and stubbing globalThis.fetch.
+
+function withGatewayEnv(token, url, fn) {
+  const origToken = process.env.QZAI_GATEWAY_TOKEN;
+  const origUrl = process.env.QZAI_GATEWAY_URL;
+  process.env.QZAI_GATEWAY_TOKEN = token;
+  if (url !== undefined) process.env.QZAI_GATEWAY_URL = url;
+  else delete process.env.QZAI_GATEWAY_URL;
+  try {
+    return fn();
+  } finally {
+    if (origToken === undefined) delete process.env.QZAI_GATEWAY_TOKEN;
+    else process.env.QZAI_GATEWAY_TOKEN = origToken;
+    if (origUrl === undefined) delete process.env.QZAI_GATEWAY_URL;
+    else process.env.QZAI_GATEWAY_URL = origUrl;
+  }
+}
+
+const planPayload = { owner: 'a', repo: 'b', issueNumber: 1, issueBody: 'x', requestedBy: 'u' };
+
+test('defaultA2aDispatch (gateway): rejects external QZAI_GATEWAY_URL', async () => {
+  await withGatewayEnv('tok', 'http://evil.com/tools/invoke', async () => {
+    const dispatch = createDispatcher();
+    await assert.rejects(
+      () => dispatch('plan', 'agent1', planPayload),
+      /QZAI_GATEWAY_URL.*not in the allowed/,
+    );
+  });
+});
+
+test('defaultA2aDispatch (gateway): rejects QZAI_GATEWAY_URL with credentials', async () => {
+  await withGatewayEnv('tok', 'http://user:pass@127.0.0.1:18789/tools/invoke', async () => {
+    const dispatch = createDispatcher();
+    await assert.rejects(
+      () => dispatch('plan', 'agent1', planPayload),
+      /must not contain credentials/,
+    );
+  });
+});
+
+test('defaultA2aDispatch (gateway): non-ok response includes body text in error', async () => {
+  const origFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: false,
+    status: 503,
+    text: async () => 'service unavailable',
+  });
+  try {
+    await withGatewayEnv('tok', 'http://127.0.0.1:18789/tools/invoke', async () => {
+      const dispatch = createDispatcher();
+      await assert.rejects(
+        () => dispatch('plan', 'agent1', planPayload),
+        /Gateway dispatch failed: HTTP 503 service unavailable/,
+      );
+    });
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+});
+
+test('defaultA2aDispatch (gateway): success returns verdict:dispatched with sessionId', async () => {
+  const origFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    text: async () => JSON.stringify({ sessionId: 'sess-42', message: 'queued' }),
+  });
+  try {
+    await withGatewayEnv('tok', 'http://127.0.0.1:18789/tools/invoke', async () => {
+      const dispatch = createDispatcher();
+      const result = await dispatch('plan', 'agent1', planPayload);
+      assert.equal(result.verdict, 'dispatched');
+      assert.equal(result.sessionId, 'sess-42');
+      assert.equal(result.summary, 'queued');
+      assert.deepEqual(result.evidenceLinks, []);
+    });
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+});

@@ -81,6 +81,7 @@ export function buildTask(command, payload) {
  * to prevent SSRF if the env var is tampered with.
  */
 const ALLOWED_A2A_PREFIXES = ['http://localhost:', 'http://127.0.0.1:', 'https://'];
+const ALLOWED_GATEWAY_PREFIXES = ['http://localhost:', 'http://127.0.0.1:'];
 
 function validateA2aEndpoint(endpoint) {
   if (!endpoint) throw new Error('QZAI_A2A_ENDPOINT is not set');
@@ -98,11 +99,30 @@ function validateA2aEndpoint(endpoint) {
   }
 }
 
+function validateGatewayUrl(url) {
+  if (!url) throw new Error('QZAI_GATEWAY_URL is not set');
+  // Parse first to catch credentials and malformed URLs early
+  let u;
+  try {
+    u = new URL(url);
+  } catch (_e) {
+    throw new Error(`QZAI_GATEWAY_URL is not a valid URL: ${url}`);
+  }
+  if (u.username || u.password) throw new Error('QZAI_GATEWAY_URL must not contain credentials');
+  const allowed = ALLOWED_GATEWAY_PREFIXES.some((prefix) => url.startsWith(prefix));
+  if (!allowed) {
+    throw new Error(`QZAI_GATEWAY_URL "${url}" is not in the allowed prefix list: ${ALLOWED_GATEWAY_PREFIXES.join(', ')}`);
+  }
+}
+
 async function defaultA2aDispatch(agentId, task) {
   const gatewayToken = process.env.QZAI_GATEWAY_TOKEN;
 
   if (gatewayToken) {
     const gatewayUrl = process.env.QZAI_GATEWAY_URL || 'http://127.0.0.1:18789/tools/invoke';
+    // Fix 1: validate gateway URL against allowlist (SSRF prevention)
+    validateGatewayUrl(gatewayUrl);
+
     const resp = await fetch(gatewayUrl, {
       method: 'POST',
       headers: {
@@ -114,30 +134,33 @@ async function defaultA2aDispatch(agentId, task) {
         args: {
           runtime: 'subagent',
           agentId,
-          mode: 'run',
-          task: typeof task === 'string' ? task : JSON.stringify(task)
-        }
+          // Fix 2: fire-and-forget — omit mode:'run' so gateway queues async;
+          // we only wait for the spawn ACK, not task completion.
+          task: typeof task === 'string' ? task : JSON.stringify(task),
+        },
       }),
       signal: AbortSignal.timeout(30_000),
     });
 
+    // Fix 3: read body before throwing so error includes server detail
+    const bodyText = await resp.text().catch(() => '');
     if (!resp.ok) {
-      throw new Error(`Gateway dispatch failed: HTTP ${resp.status}`);
+      throw new Error(`Gateway dispatch failed: HTTP ${resp.status} ${bodyText}`.trimEnd());
     }
 
-    const gwResult = await resp.json();
-    let parsed = {};
+    // Fix 3: parse JSON safely, fall back to raw text
+    let gwResult;
     try {
-      const raw = gwResult.result ?? gwResult;
-      parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
-    } catch (e) {
-      parsed = { summary: gwResult.result ?? (typeof gwResult === 'string' ? gwResult : JSON.stringify(gwResult)) };
+      gwResult = JSON.parse(bodyText);
+    } catch (_e) {
+      gwResult = { summary: bodyText || 'Gateway returned non-JSON response' };
     }
 
     return {
-      verdict: parsed?.verdict || 'success',
-      summary: parsed?.summary || parsed?.result || 'Task dispatched via Gateway',
-      evidenceLinks: parsed?.evidenceLinks || []
+      verdict: 'dispatched',
+      sessionId: gwResult?.sessionId ?? gwResult?.id ?? undefined,
+      summary: gwResult?.summary ?? gwResult?.message ?? 'Task dispatched via Gateway',
+      evidenceLinks: [],
     };
   }
 
