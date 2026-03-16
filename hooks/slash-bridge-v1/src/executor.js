@@ -75,7 +75,7 @@ export function buildTask(command, payload) {
  * Default A2A dispatch function.
  * Sends task to agent via HTTP POST.
  *
- * CRIT-2 fix: validate QZAI_A2A_ENDPOINT against an allowlist of safe prefixes
+ * Validates QZAI_A2A_ENDPOINT against an allowlist of safe prefixes
  * to prevent SSRF if the env var is tampered with.
  */
 const ALLOWED_A2A_PREFIXES = ['http://localhost:', 'http://127.0.0.1:', 'https://'];
