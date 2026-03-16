@@ -15,6 +15,20 @@ jobs:
     outputs:
       allow_wrapper: ${{ steps.check.outputs.allow_wrapper }}
     steps:
+      - name: Slack notify start
+        if: ${{ secrets.SLACK_WEBHOOK_URL != '' }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          comment_url="${{ github.event.comment.html_url }}"
+          curl -sS -X POST "$SLACK_WEBHOOK_URL" \
+            -H 'Content-type: application/json' \
+            --data "{\"text\":\"[QZAI] workflow started: ${GITHUB_WORKFLOW}\\nrepo: ${GITHUB_REPOSITORY}\\nactor: ${GITHUB_ACTOR}\\ncomment: ${comment_url}\\nrun: ${run_url}\"}"
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
       - id: check
         name: Check first-line command
         shell: bash
@@ -41,3 +55,22 @@ jobs:
     if: ${{ needs.guard-two-stage-overlap.outputs.allow_wrapper == 'true' }}
     uses: ./.github/workflows/qzai-issue-commands.yml
     secrets: inherit
+
+  slack-notify-end:
+    needs: [guard-two-stage-overlap, qzai-issue-commands]
+    if: ${{ always() && secrets.SLACK_WEBHOOK_URL != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Slack notify end
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          comment_url="${{ github.event.comment.html_url }}"
+          # prefer the real result of the called workflow if it ran, otherwise use guard result
+          result="${{ needs.qzai-issue-commands.result || needs.guard-two-stage-overlap.result }}"
+          curl -sS -X POST "$SLACK_WEBHOOK_URL" \
+            -H 'Content-type: application/json' \
+            --data "{\"text\":\"[QZAI] workflow finished: ${GITHUB_WORKFLOW}\\nresult: ${result}\\nrepo: ${GITHUB_REPOSITORY}\\nactor: ${GITHUB_ACTOR}\\ncomment: ${comment_url}\\nrun: ${run_url}\"}"
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
