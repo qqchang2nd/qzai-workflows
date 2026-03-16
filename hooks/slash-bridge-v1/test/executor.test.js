@@ -153,14 +153,15 @@ test('createDispatcher: passes full payload to task builder', async () => {
 // These tests exercise the real defaultA2aDispatch (no injected mock)
 // by controlling env vars and stubbing globalThis.fetch.
 
-function withGatewayEnv(token, url, fn) {
+async function withGatewayEnv(token, url, fn) {
   const origToken = process.env.QZAI_GATEWAY_TOKEN;
   const origUrl = process.env.QZAI_GATEWAY_URL;
-  process.env.QZAI_GATEWAY_TOKEN = token;
+  if (token !== undefined) process.env.QZAI_GATEWAY_TOKEN = token;
+  else delete process.env.QZAI_GATEWAY_TOKEN;
   if (url !== undefined) process.env.QZAI_GATEWAY_URL = url;
   else delete process.env.QZAI_GATEWAY_URL;
   try {
-    return fn();
+    return await fn();
   } finally {
     if (origToken === undefined) delete process.env.QZAI_GATEWAY_TOKEN;
     else process.env.QZAI_GATEWAY_TOKEN = origToken;
@@ -226,6 +227,30 @@ test('defaultA2aDispatch (gateway): success returns verdict:dispatched with sess
       assert.equal(result.sessionId, 'sess-42');
       assert.equal(result.summary, 'queued');
       assert.deepEqual(result.evidenceLinks, []);
+    });
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+});
+
+test('defaultA2aDispatch (A2A fallback): routes to A2A endpoint when QZAI_GATEWAY_TOKEN is absent', async () => {
+  const origFetch = globalThis.fetch;
+  const capturedUrls = [];
+  globalThis.fetch = async (url) => {
+    capturedUrls.push(url);
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ verdict: 'success', summary: 'a2a ok', evidenceLinks: [] }),
+    };
+  };
+  try {
+    await withGatewayEnv(undefined, undefined, async () => {
+      const dispatch = createDispatcher();
+      const result = await dispatch('plan', 'agent1', planPayload);
+      assert.equal(capturedUrls.length, 1);
+      assert.ok(capturedUrls[0].includes('/dispatch'), `Expected A2A /dispatch, got: ${capturedUrls[0]}`);
+      assert.equal(result.verdict, 'success');
     });
   } finally {
     globalThis.fetch = origFetch;

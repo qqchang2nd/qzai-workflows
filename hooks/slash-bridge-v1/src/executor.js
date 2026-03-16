@@ -79,6 +79,8 @@ export function buildTask(command, payload) {
  * to prevent SSRF if the env var is tampered with.
  */
 const ALLOWED_A2A_PREFIXES = ['http://localhost:', 'http://127.0.0.1:', 'https://'];
+// Gateway runs only on localhost — https:// is intentionally excluded to prevent
+// accidental SSRF if QZAI_GATEWAY_URL is misconfigured to point at an external host.
 const ALLOWED_GATEWAY_PREFIXES = ['http://localhost:', 'http://127.0.0.1:'];
 
 function validateA2aEndpoint(endpoint) {
@@ -118,8 +120,12 @@ async function defaultA2aDispatch(agentId, task) {
 
   if (gatewayToken) {
     const gatewayUrl = process.env.QZAI_GATEWAY_URL || 'http://127.0.0.1:18789/tools/invoke';
-    // Fix 1: validate gateway URL against allowlist (SSRF prevention)
+    // Validate URL against localhost allowlist to prevent SSRF on misconfigured env.
     validateGatewayUrl(gatewayUrl);
+
+    // sessions_spawn expects task as a JSON string (gateway wire format).
+    // The outer body is serialized separately by JSON.stringify below.
+    const taskStr = JSON.stringify(task);
 
     const resp = await fetch(gatewayUrl, {
       method: 'POST',
@@ -132,21 +138,20 @@ async function defaultA2aDispatch(agentId, task) {
         args: {
           runtime: 'subagent',
           agentId,
-          // Fix 2: fire-and-forget — omit mode:'run' so gateway queues async;
-          // we only wait for the spawn ACK, not task completion.
-          task: typeof task === 'string' ? task : JSON.stringify(task),
+          // No mode:'run' — gateway queues the task async; we only wait for the spawn ACK.
+          task: taskStr,
         },
       }),
       signal: AbortSignal.timeout(30_000),
     });
 
-    // Fix 3: read body before throwing so error includes server detail
+    // Read body before checking status so error messages include the server detail.
     const bodyText = await resp.text().catch(() => '');
     if (!resp.ok) {
       throw new Error(`Gateway dispatch failed: HTTP ${resp.status} ${bodyText}`.trimEnd());
     }
 
-    // Fix 3: parse JSON safely, fall back to raw text
+    // Parse JSON safely; fall back to raw text if gateway returns non-JSON (e.g. proxy error page).
     let gwResult;
     try {
       gwResult = JSON.parse(bodyText);
@@ -156,7 +161,7 @@ async function defaultA2aDispatch(agentId, task) {
 
     return {
       verdict: 'dispatched',
-      sessionId: gwResult?.sessionId ?? gwResult?.id ?? undefined,
+      sessionId: gwResult?.sessionId ?? gwResult?.id,
       summary: gwResult?.summary ?? gwResult?.message ?? 'Task dispatched via Gateway',
       evidenceLinks: [],
     };
