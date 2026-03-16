@@ -12,13 +12,6 @@ test('buildTask: plan command returns plan task structure', () => {
   assert.ok(task.instructions.includes('PLAN.md'));
 });
 
-test('buildTask: plan-pr alias returns same as plan', () => {
-  const payload = { owner: 'acme', repo: 'app', issueNumber: 42, issueBody: 'desc', requestedBy: 'alice' };
-  const taskPlan = buildTask('plan', payload);
-  const taskAlias = buildTask('plan-pr', payload);
-  assert.equal(taskPlan.type, taskAlias.type);
-});
-
 test('buildTask: implement command returns implement task structure', () => {
   const payload = {
     owner: 'acme', repo: 'app', issueNumber: 5,
@@ -29,13 +22,6 @@ test('buildTask: implement command returns implement task structure', () => {
   assert.equal(task.type, 'implement');
   assert.ok(task.instructions.includes('PLAN.md'));
   assert.ok(task.instructions.includes('Closes #5'));
-});
-
-test('buildTask: impl-pr alias returns same as implement', () => {
-  const payload = { owner: 'acme', repo: 'app', issueNumber: 5, requestedBy: 'bob' };
-  const a = buildTask('implement', payload);
-  const b = buildTask('impl-pr', payload);
-  assert.equal(a.type, b.type);
 });
 
 test('buildTask: review command returns code-review task structure', () => {

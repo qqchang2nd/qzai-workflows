@@ -24,11 +24,9 @@ export function buildTask(command, payload) {
 
   switch (command) {
     case 'plan':
-    case 'plan-pr':
       return buildPlanTask({ owner, repo, issueNumber, issueBody: payload.issueBody, requestedBy });
 
     case 'implement':
-    case 'impl-pr':
       return buildImplementTask({
         owner, repo, issueNumber,
         planPrNumber: payload.planPrNumber,
